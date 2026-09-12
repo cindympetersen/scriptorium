@@ -84,6 +84,7 @@ Exit codes: 0 open (or no field) · 1 usage · 2 a malformed or zoneless moment 
 """
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -503,16 +504,36 @@ def cmd_arm(args):
                  '  the author read them, then arm with --reviewed "<who, when>".')
     path = os.path.join(pdir, 'publish.yaml')
     src = open(path, encoding='utf-8').read()
+    # The key is `armed:`, NOT `scheduled:`. `record` owns `scheduled:` for the per-outlet
+    # record of a platform schedule, and writing a second top-level `scheduled:` here made a
+    # duplicate key: YAML lets the later one win, so arming a piece SILENTLY ERASED the record
+    # of which platform had been told — the one thing that distinguishes a schedule that was
+    # set from one that was forgotten. Measured on false-light, 2026-09-11.
+    #
+    # And every value is emitted as a JSON string, which is a valid YAML double-quoted scalar.
+    # `--does` is a sentence written by a human and a sentence contains colons: `does: … live:
+    # confirms …` broke the manifest so completely that PyYAML would not read it at all, and
+    # `armed` could not see the damage because it reads this block with a regex.
+    q = json.dumps
     block = (f'# A scheduled wake-up is armed for this piece. The moment of record is {FIELD};\n'
              f'# this block is only the note that something was told to fire near it. Armed only\n'
              f'# after the drafts were read and approved — see `approved`.\n'
-             f'scheduled:\n'
-             f'  task: {args.task}\n'
-             f'  fires: {args.fires or fmt(moment)}\n'
-             f'  does: {args.does}\n'
-             f'  approved: {args.reviewed}\n')
-    src = re.sub(r'(?ms)^# A scheduled wake-up.*?^  does: .*?$\n', '', src)
+             f'armed:\n'
+             f'  task: {q(args.task)}\n'
+             f'  fires: {q(args.fires or fmt(moment))}\n'
+             f'  does: {q(args.does)}\n'
+             f'  approved: {q(args.reviewed)}\n')
+    src = re.sub(r'(?ms)^# A scheduled wake-up.*?^  approved: .*?$\n', '', src)
     src = src.rstrip('\n') + '\n\n' + block
+    # A manifest writer that can emit invalid YAML is the deeper fault, so prove the result
+    # parses before it lands. Everything on this desk reads publish.yaml; leaving it broken is
+    # worse than refusing to arm.
+    try:
+        import yaml as _yaml
+        _yaml.safe_load(src)
+    except Exception as e:
+        sys.exit(f'refusing to arm: the result would not parse as YAML — {e}\n'
+                 f'  nothing was written. This is a bug in this tool, not in your input.')
     open(path, 'w', encoding='utf-8').write(src)
     print(f'{os.path.basename(pdir)}: armed — {args.task} fires {args.fires or fmt(moment)}')
     return 0
@@ -525,9 +546,21 @@ def cmd_armed(args):
         if not os.path.exists(p):
             continue
         src = open(p, encoding='utf-8').read()
-        m = re.search(r'(?ms)^scheduled:\n  task: (.+?)\n  fires: (.+?)\n  does: (.+?)$', src)
+        # `armed:` is the current key; the older shape wrote `scheduled:` and is still read so
+        # a piece armed before the fix is not invisible here.
+        m = (re.search(r'(?ms)^armed:\n  task: (.+?)\n  fires: (.+?)\n  does: (.+?)$', src)
+             or re.search(r'(?ms)^scheduled:\n  task: (.+?)\n  fires: (.+?)\n  does: (.+?)$', src))
         if m:
-            rows.append((os.path.basename(pdir), m.group(1), m.group(2), m.group(3)))
+            # the values are YAML double-quoted scalars now; show them as the words they are
+            def unq(v):
+                v = v.strip()
+                if v[:1] == '"':
+                    try:
+                        return json.loads(v)
+                    except Exception:
+                        return v
+                return v
+            rows.append((os.path.basename(pdir), unq(m.group(1)), unq(m.group(2)), unq(m.group(3))))
     if not rows:
         print('nothing armed')
         return 0
