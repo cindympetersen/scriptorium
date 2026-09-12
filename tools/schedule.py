@@ -570,9 +570,38 @@ def cmd_armed(args):
     return 0
 
 
+def required_companions_missing(pdir):
+    """-> [(role, why)] its publication requires and this piece has not got. Arming the schedule
+    is the approval moment (docs/SCHEDULING.md), and it is the last one where writing a Note is
+    cheap — after it, the next person to touch the piece is publishing it."""
+    try:
+        import publications as pb
+        root = os.path.dirname(os.path.dirname(os.path.abspath(pdir)))
+        pubs, _ = pb.load(root)
+        if not pubs:                                        # a one-publication desk asks nothing
+            return []
+        return pb.missing_companions(pb.read_manifest(pdir), pubs, pdir, require_live=False)
+    except Exception:
+        return []                                           # never let this block a schedule
+
+
 def cmd_set(args):
     pdir = resolve(args.piece)
     moment = parse_moment(args.moment)                      # refuse before writing
+    missing = [] if getattr(args, 'no_companions', False) else required_companions_missing(pdir)
+    if missing:
+        slug = os.path.basename(pdir)
+        print(f'{slug}: NOT scheduled — this publication requires a companion this piece '
+              f'has not got:', file=sys.stderr)
+        for role, why in missing:
+            print(f'    {role}: {why}', file=sys.stderr)
+        print('\nWrite it (a note is `note.md` with a form/style header, declared as\n'
+              '`companions: {note: note.md}`), or say why it is exempt with\n'
+              '`companions_exempt: {note: "<reason>"}`. To arm the schedule anyway, pass\n'
+              '--no-companions. The check is here because arming the schedule is the approval,\n'
+              'and a Note found missing on publication morning is found too late.',
+              file=sys.stderr)
+        return 5
     path = os.path.join(pdir, 'publish.yaml')
     lines = open(path, encoding='utf-8').read().split('\n')
     line = f'{FIELD}: {args.moment.strip()}'
@@ -651,6 +680,8 @@ def main():
     c = sub.add_parser('set', help='write the field')
     c.add_argument('piece')
     c.add_argument('moment')
+    c.add_argument('--no-companions', action='store_true',
+                   help='arm the schedule even though a required companion is missing')
     c.set_defaults(fn=cmd_set)
 
     c = sub.add_parser('clear', help='remove the field')

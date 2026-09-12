@@ -256,14 +256,20 @@ def missing_required(man, pubs, outlets=None):
     return out
 
 
-def missing_companions(man, pubs, piece_dir, outlets=None):
+def missing_companions(man, pubs, piece_dir, outlets=None, require_live=True):
     """-> [(role, why)] for a PUBLISHED piece: each companion its publication requires that the
     piece neither declares nor exempts. `companions_exempt: {note: "reason"}` opts out, with a
     reason, for the same cause as outlets_exempt: the rule is "every piece, unless the author
     says otherwise", and the saying has to be written down. A draft is not held to it.
 
     Published is read the same way `missing_required` reads it — by the piece's OWN outlet's
-    manifest key — so this asks nothing of a piece that has not gone live."""
+    manifest key — so this asks nothing of a piece that has not gone live.
+
+    `require_live=False` asks it of a piece that is not live yet. That is for the one moment
+    before publication where the answer still costs nothing: arming the schedule, which on this
+    desk IS the approval (`schedule.py set`, docs/SCHEDULING.md). Checked only at publication, a
+    missing Note is found on the morning the post goes out. (Eric, 2026-09-11: the Note "should
+    happen by default after approval, please make sure the tooling would do this".)"""
     if not pubs or not man:
         return []
     if outlets is None:
@@ -271,7 +277,7 @@ def missing_companions(man, pubs, piece_dir, outlets=None):
     else:
         import check_status as cs
         live = cs.live_url(man, outlets)
-    if not live:
+    if not live and require_live:
         return []
     e = pubs.get(man.get('publication') or '')
     if not e:

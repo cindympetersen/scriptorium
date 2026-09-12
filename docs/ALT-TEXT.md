@@ -51,14 +51,13 @@ rule is stated positively.
 ### Every figure gets one, by default
 
 **A figure carries a caption unless there is a reason it does not.** Not only the hero — every
-image in the body. (Eric, 2026-09-11, on a redraft whose one figure had alt text and nothing
-else: *"the figure should have a caption. (and this should be the default behavior)"*.)
+image in the body. (An author's ruling, 2026-09-11, on a redraft whose one figure had alt text
+and nothing else; the wording is in that instance's own ledger.)
 
-The reason it is a default rather than a judgment each time: a figure is introduced by the
-sentence before it and read by the sentence after it, so its caption is the one line that
-survives a reader who is skimming — and skimming past a figure is what readers do. A drafting
-pass that writes alt text and stops has given the screen-reader user a description and the
-sighted reader nothing.
+The reason it is a default rather than a judgment each time: readers stop at pictures before
+they stop at paragraphs, so the caption is often the only sentence of yours they meet near a
+figure. A drafting pass that writes alt text and stops has handed the screen-reader user a
+description and the sighted reader nothing.
 
 Captions live in `publish.yaml` under `captions:`, keyed by the image's local path, beside
 `cover_caption:` for the hero. `md_to_substack` emits them on compose; `substack_captions.py`
