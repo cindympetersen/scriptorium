@@ -176,6 +176,12 @@ first.
    that is scheduled from one that was forgotten, and says the same reassuring sentence either
    way. [`framework/docs/SCHEDULING.md`](../../docs/SCHEDULING.md) has the field and the rule.
 
+0. **Run every gate in one command first:** `python3 framework/tools/gates.py pieces/<name>`
+   — links, verified, scripture, quotes, CommonMark, pronouns, stage direction, refs. The
+   individual tools are documented below and each is worth reading when it fires; the runner is
+   what makes "I ran the checks" mean all of them. (Added 2026-09-11, after a pre-publish read
+   worked down the list by hand and skipped the scripture gate while the desk held the index.)
+
 0. **Verification gate — run it, and do not argue with it.**
 
    ```

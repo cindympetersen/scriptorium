@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check a draft's scripture quotations against an indexed KJV.
+"""Check a draft's scripture quotations — BODY AND FOOTNOTES — against an indexed KJV.
 
 WHY THIS EXISTS
   `check_verified.py` records whether anyone SAID they checked, and says plainly
@@ -111,6 +111,15 @@ def footnotes(draft):
     return out
 
 
+def body_paragraphs(draft):
+    """The prose, in paragraphs — scaffold header and footnote tail removed."""
+    body = draft.split("\n---\n", 1)[-1]
+    m = re.search(r"^\[\^[\w-]+\]:", body, re.M)
+    if m:
+        body = body[:m.start()]
+    return [" ".join(p.split()) for p in re.split(r"\n\s*\n", body) if p.strip()]
+
+
 def quoted_spans(text):
     """Italic spans are how this house sets a quotation — and also how it sets a
     sibling essay's title, a Greek phrase, and ordinary emphasis.
@@ -202,6 +211,136 @@ def house_changes(quote, canonical):
     return notes
 
 
+def check_unit(label, loci_text, span_text, idx, verbose):
+    """Check one unit of a draft: a body paragraph with the notes it carries, or a note.
+
+    Extracted 2026-09-11 so the BODY is checked too. Until then this tool read
+    `footnotes(draft)` and nothing else — so on a piece that puts its quotations in
+    the prose and its citations in the notes, which is most of this corpus, it could
+    report "0 problems" having looked at none of the quotations a reader sees.
+    (What Holds You Here: 4 footnote quotations checked, 27 body fragments not.)
+    """
+    checked = bad = 0
+    # A footnote may cite more than one verse — this house routinely raises a
+    # counterweight in the same note (1 Thess 5:18 answered by Eph 5:20). Check
+    # every quotation against EVERY locus the note cites, or the second verse's
+    # quotation reads as drift against the first verse.
+    # A cited RANGE is checked as a range. LOCUS_RE has always captured the end
+    # verse in group 4 and this loop threw it away, so a note that correctly read
+    # `13:4-5` was checked against 13:4 alone and then told to "cite 13:4-5" —
+    # advising exactly what it already said. That is a checker flagging correct
+    # prose, which this file's own docstring names as the failure that trains a
+    # reader to ignore it. Measured on false-light 2026-09-10.
+    keys, cited_to = [], {}
+    for lm in LOCUS_RE.finditer(loci_text):
+        book = ALIASES.get(lm.group(1), lm.group(1))
+        k = (book, int(lm.group(2)), int(lm.group(3)))
+        end = int(lm.group(4)) if lm.group(4) else k[2]
+        if k not in keys:
+            keys.append(k)
+        cited_to[k] = max(cited_to.get(k, end), end)
+    if not keys:
+        return checked, bad
+
+    def shown(k):
+        hi = cited_to.get(k, k[2])
+        return f"{k[0]} {k[1]}:{k[2]}" + (f"-{hi}" if hi > k[2] else "")
+
+    def cited_text(k):
+        b, c, v = k
+        hi = cited_to.get(k, v)
+        parts = [idx[(b, c, i)] for i in range(v, hi + 1) if (b, c, i) in idx]
+        return " ".join(parts) if parts else idx[k]
+
+    print(f"{label} " + " · ".join(shown(k) for k in keys))
+    unknown = [k for k in keys if k not in idx]
+    if unknown:
+        for b, c, v in unknown:
+            print(f"   NOT IN INDEX — {b} {c}:{v} does not exist in this edition")
+        bad += len(unknown)
+    keys = [k for k in keys if k in idx]
+    if not keys:
+        return checked, bad
+    canons = {k: norm(cited_text(k)) for k in keys}
+    spans = quoted_spans(span_text)
+    if not spans:
+        print("   locus only, no quotation to check"); return checked, bad
+    skipped = 0
+    for q in spans:
+        key, (score, run) = max(((k, overlap(q, canons[k])) for k in keys),
+                                key=lambda kv: kv[1])
+        canon = canons[key]
+        # A short commentary fragment can score high on one common word, so a
+        # candidate needs an absolute run too: "What the ellipsis drops" hits
+        # 25% on the word "the" alone.
+        if score < 0.25 or run < 4:
+            skipped += 1
+            if verbose:
+                print(f"   skipped (not a quotation of this verse): {' '.join(q.split())[:60]}")
+            continue
+        checked += 1
+        ok, detail = match(q, canon)
+        if not ok:
+            # A COMPOSITE span: the house sets several verses as one run of italics —
+            # *I and My Father are one. Before Abraham was, I am. He that hath seen Me
+            # hath seen the Father.* — and the note cites all three. Against any single
+            # one of them that reads as 45% drift, which is a checker crying wolf on
+            # correct prose, and this file's docstring says that is the failure to avoid.
+            # So: every sentence tried against every locus the note names, and a match
+            # only if all of them land.
+            sents = [x for x in re.split(r"(?<=[.?!])\s+", q) if len(norm(x).split()) >= 4]
+            if len(sents) > 1 and all(any(match(x, canons[k])[0] for k in keys) for x in sents):
+                print(f"   MATCH   {len(sents)} verses in one span — "
+                      + " · ".join(shown(k) for k in keys))
+                for n in house_changes(q, " ".join(cited_text(k) for k in keys)):
+                    print(f"     {n}")
+                continue
+        if ok:
+            where = f" — {shown(key)}" if len(keys) > 1 else ""
+            print(f"   MATCH   {detail}{where}")
+            for n in house_changes(q, cited_text(key)):
+                print(f"     {n}")
+            if verbose:
+                print(f"     KJV  : {cited_text(key)[:110]}")
+            continue
+
+        # The commonest real finding is not drift but an UNDER-CITED RANGE: the
+        # quotation continues into the next verse while the note names only the
+        # first. Extend forward before calling anything wrong.
+        # Extend BOTH ways: a quotation can begin before the verse the note
+        # names as easily as it can run past it (2 Corinthians 11:13-14 cited
+        # as 11:14, measured on false-light 2026-09-10).
+        b, c, v = key
+        span_lo = span_hi = None
+        for lo in range(v, max(0, v - 4) - 1, -1):
+            for hi in range(v, v + 5):
+                if (b, c, lo) not in idx or (b, c, hi) not in idx or (lo, hi) == (v, v):
+                    continue
+                joined = " ".join(idx[(b, c, i)] for i in range(lo, hi + 1))
+                if match(q, norm(joined))[0]:
+                    span_lo, span_hi = lo, hi
+                    break
+            if span_lo:
+                break
+        bad += 1
+        if span_lo:
+            rng = f"{c}:{span_lo}" if span_lo == span_hi else f"{c}:{span_lo}-{span_hi}"
+            print(f"   RANGE   the quotation covers {b} {rng}, but the note cites "
+                  f"only {shown(key)[len(b) + 1:]} — cite {rng}")
+        elif score < 0.6:
+            print(f"   SUSPECT only {int(score*100)}% of the span is in the verse — "
+                  f"read it; a real drift looks like this")
+            print(f"     draft: {' '.join(q.split())[:110]}")
+            print(f"     KJV  : {idx[key][:110]}")
+        else:
+            print(f"   DRIFT   {detail}")
+            print(f"     draft: {' '.join(q.split())[:110]}")
+            print(f"     KJV  : {idx[key][:110]}")
+    if skipped and not verbose:
+        print(f"   ({skipped} italic span(s) skipped as commentary — -v to list)")
+    return checked, bad
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     if not args:
@@ -224,109 +363,23 @@ def main():
     verbose = "-v" in sys.argv
 
     checked = bad = 0
-    for name, note in footnotes(draft_path and open(draft_path).read()):
-        # A footnote may cite more than one verse — this house routinely raises a
-        # counterweight in the same note (1 Thess 5:18 answered by Eph 5:20). Check
-        # every quotation against EVERY locus the note cites, or the second verse's
-        # quotation reads as drift against the first verse.
-        # A cited RANGE is checked as a range. LOCUS_RE has always captured the end
-        # verse in group 4 and this loop threw it away, so a note that correctly read
-        # `13:4-5` was checked against 13:4 alone and then told to "cite 13:4-5" —
-        # advising exactly what it already said. That is a checker flagging correct
-        # prose, which this file's own docstring names as the failure that trains a
-        # reader to ignore it. Measured on false-light 2026-09-10.
-        keys, cited_to = [], {}
-        for lm in LOCUS_RE.finditer(note):
-            book = ALIASES.get(lm.group(1), lm.group(1))
-            k = (book, int(lm.group(2)), int(lm.group(3)))
-            end = int(lm.group(4)) if lm.group(4) else k[2]
-            if k not in keys:
-                keys.append(k)
-            cited_to[k] = max(cited_to.get(k, end), end)
-        if not keys:
+    draft = open(draft_path).read()
+    notes = dict(footnotes(draft))
+
+    # The body first, because that is what a reader meets. A paragraph's loci are the
+    # ones its own markers cite: the house writes the quotation in the prose and the
+    # citation in the note, so neither half is checkable without the other.
+    for i, para in enumerate(body_paragraphs(draft), 1):
+        marks = [m for m in re.findall(r"\[\^([\w-]+)\]", para) if m in notes]
+        if not marks:
             continue
+        c, b = check_unit(f"\u00b6{i} " + " ".join(f"[^{m}]" for m in marks),
+                          " ".join(notes[m] for m in marks), para, idx, verbose)
+        checked += c; bad += b
 
-        def shown(k):
-            hi = cited_to.get(k, k[2])
-            return f"{k[0]} {k[1]}:{k[2]}" + (f"-{hi}" if hi > k[2] else "")
-
-        def cited_text(k):
-            b, c, v = k
-            hi = cited_to.get(k, v)
-            parts = [idx[(b, c, i)] for i in range(v, hi + 1) if (b, c, i) in idx]
-            return " ".join(parts) if parts else idx[k]
-
-        print(f"[^{name}] " + " · ".join(shown(k) for k in keys))
-        unknown = [k for k in keys if k not in idx]
-        if unknown:
-            for b, c, v in unknown:
-                print(f"   NOT IN INDEX — {b} {c}:{v} does not exist in this edition")
-            bad += len(unknown)
-        keys = [k for k in keys if k in idx]
-        if not keys:
-            continue
-        canons = {k: norm(cited_text(k)) for k in keys}
-        spans = quoted_spans(note)
-        if not spans:
-            print("   locus only, no quotation to check"); continue
-        skipped = 0
-        for q in spans:
-            key, (score, run) = max(((k, overlap(q, canons[k])) for k in keys),
-                                    key=lambda kv: kv[1])
-            canon = canons[key]
-            # A short commentary fragment can score high on one common word, so a
-            # candidate needs an absolute run too: "What the ellipsis drops" hits
-            # 25% on the word "the" alone.
-            if score < 0.25 or run < 4:
-                skipped += 1
-                if verbose:
-                    print(f"   skipped (not a quotation of this verse): {' '.join(q.split())[:60]}")
-                continue
-            checked += 1
-            ok, detail = match(q, canon)
-            if ok:
-                where = f" — {shown(key)}" if len(keys) > 1 else ""
-                print(f"   MATCH   {detail}{where}")
-                for n in house_changes(q, cited_text(key)):
-                    print(f"     {n}")
-                if verbose:
-                    print(f"     KJV  : {cited_text(key)[:110]}")
-                continue
-
-            # The commonest real finding is not drift but an UNDER-CITED RANGE: the
-            # quotation continues into the next verse while the note names only the
-            # first. Extend forward before calling anything wrong.
-            # Extend BOTH ways: a quotation can begin before the verse the note
-            # names as easily as it can run past it (2 Corinthians 11:13-14 cited
-            # as 11:14, measured on false-light 2026-09-10).
-            b, c, v = key
-            span_lo = span_hi = None
-            for lo in range(v, max(0, v - 4) - 1, -1):
-                for hi in range(v, v + 5):
-                    if (b, c, lo) not in idx or (b, c, hi) not in idx or (lo, hi) == (v, v):
-                        continue
-                    joined = " ".join(idx[(b, c, i)] for i in range(lo, hi + 1))
-                    if match(q, norm(joined))[0]:
-                        span_lo, span_hi = lo, hi
-                        break
-                if span_lo:
-                    break
-            bad += 1
-            if span_lo:
-                rng = f"{c}:{span_lo}" if span_lo == span_hi else f"{c}:{span_lo}-{span_hi}"
-                print(f"   RANGE   the quotation covers {b} {rng}, but the note cites "
-                      f"only {shown(key)[len(b) + 1:]} — cite {rng}")
-            elif score < 0.6:
-                print(f"   SUSPECT only {int(score*100)}% of the span is in the verse — "
-                      f"read it; a real drift looks like this")
-                print(f"     draft: {' '.join(q.split())[:110]}")
-                print(f"     KJV  : {idx[key][:110]}")
-            else:
-                print(f"   DRIFT   {detail}")
-                print(f"     draft: {' '.join(q.split())[:110]}")
-                print(f"     KJV  : {idx[key][:110]}")
-        if skipped and not verbose:
-            print(f"   ({skipped} italic span(s) skipped as commentary — -v to list)")
+    for name, note in footnotes(draft):
+        c, b = check_unit(f"[^{name}]", note, note, idx, verbose)
+        checked += c; bad += b
 
     print(f"\n{checked} quotation(s) checked, {bad} problem(s)")
     sys.exit(4 if bad else 0)

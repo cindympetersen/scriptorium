@@ -14,7 +14,18 @@ WHY THIS EXISTS
 
 SCHEMES
   pages   (default)  one row per page: <page>\\t<text>. Works on any PDF.
-  kjv                one row per verse: <book>\\t<ch>\\t<v>\\t<text>.
+  kjv                one row per verse, from a PDF: <book>\\t<ch>\\t<v>\\t<text>.
+  kjv-text           the same rows from a Gutenberg-style PLAIN TEXT KJV (eBook #10).
+                     Prefer it: a text file has no pages, so it has no furniture.
+  text               a .txt indexed by line-block.
+
+RUNNING HEADERS AND FOOTERS ARE STRIPPED, AND A CONTAMINATED INDEX CANNOT PASS
+  The furniture arrives mid-sentence ("of the stock of Israel, [of] the
+  www.holybooks.com Page 678 tribe of Benjamin") and makes a correct quotation look
+  like drift. Every PDF path now runs `strip_furniture` (phrases repeating on half
+  the pages) and `scrub` (URLs, "Page N"), and `--verify` FAILS on any row that
+  still carries furniture. Measured 2026-09-11: 684 verses of the shipped KJV index
+  were contaminated and every existing check passed them.
 
 USAGE
   python3 refindex.py <pdf> --out <index.tsv[.gz]> [--scheme kjv|pages]
@@ -80,6 +91,151 @@ def clean(t):
     return re.sub(r"(\w)[-\u00ad]\s+(\w)", r"\1\2", t)
 
 
+# Running headers and footers are the page's furniture, not the work's words, and
+# they arrive INSIDE a sentence: "of the stock of Israel, [of] the www.holybooks.com
+# Page 678 tribe of Benjamin". A checker then reports a correct quotation as drift,
+# which this tool's own docstring calls worse than no checker. Measured 2026-09-11:
+# 684 verses across 66 books of kjv.tsv.gz carried exactly that.
+#
+# Two passes, because neither alone is enough. The regex catches the forms that are
+# furniture wherever they appear; the frequency pass catches this PDF's particular
+# boilerplate, whatever it says, because furniture is what repeats on every page and
+# a work's sentences do not.
+FURNITURE_RE = re.compile(
+    r"""(?ix)
+      \b(?:https?://|www\.)[^\s]+          # a bare URL
+    | \bPage\s+\d+\b                      # Page 678
+    | \b\d+\s*\|\s*Page\b               # 678 | Page
+    """)
+
+
+def _shingles(tokens, n=3):
+    return [" ".join(tokens[i:i + n]) for i in range(len(tokens) - n + 1)]
+
+
+def strip_furniture(pages, threshold=0.5, n=3):
+    """Drop the boilerplate that repeats across pages. Returns (pages, report).
+
+    A phrase on half the pages of a book is running furniture; a sentence of the
+    work is not. Detection is on a normalized shingle (case-folded, digits masked)
+    so "Page 12" and "Page 678" are the same furniture, and removal then takes the
+    maximal run of furniture tokens — otherwise a three-word window leaves its tail
+    behind and the verse still reads "678 tribe of Benjamin".
+
+    `threshold` is deliberately high. A false positive here DELETES the work's own
+    words, which is the failure this tool already paid for once by filtering on
+    geometry (see the module docstring), so the bar to call something furniture is
+    that it is nearly everywhere.
+    """
+    import collections
+    texts = [t for _, t in pages]
+    if len(texts) < 4:
+        return pages, []
+    mask = lambda w: re.sub(r"\d+", "#", w.lower())
+    seen = collections.Counter()
+    for t in texts:
+        seen.update(set(_shingles([mask(w) for w in t.split()], n)))
+    cut = max(2, int(len(texts) * threshold))
+    furniture = {sh for sh, c in seen.items() if c >= cut}
+    if not furniture:
+        return pages, []
+    out, removed = [], collections.Counter()
+    for num, t in pages:
+        words = t.split()
+        masked = [mask(w) for w in words]
+        drop = [False] * len(words)
+        for i in range(len(words) - n + 1):
+            if " ".join(masked[i:i + n]) in furniture:
+                for j in range(i, i + n):
+                    drop[j] = True
+        if any(drop):
+            removed[" ".join(w for w, d in zip(words, drop) if d)[:60]] += 1
+        out.append((num, " ".join(w for w, d in zip(words, drop) if not d)))
+    return out, removed.most_common(6)
+
+
+def scrub(t):
+    """Remove the furniture forms that are furniture wherever they appear."""
+    return re.sub(r"\s{2,}", " ", FURNITURE_RE.sub(" ", t)).strip()
+
+
+# The Gutenberg plain text names its books in full and in canonical order, which is
+# why this needs no header parsing at all: the nth heading IS the nth book. That is
+# the whole reason to prefer it over the PDF — a text with no pages has no furniture.
+VERSE_MARK = re.compile(r"\d+:\d+ ")
+
+# Gutenberg eBook #10 carries one scanning typo, and a checker without this map
+# reports a correct quotation of Galatians 2:20 as drift — the same fault as the
+# page furniture, arriving from the other direction. Corrections live here rather
+# than being edited into the index, so the index stays rebuildable from its source
+# and every departure from that source is visible in one place.
+#
+# The bar for a line here: the source's reading is not a printing variant of the
+# King James (this one is not a word), and the editions of record have the other.
+PG10_ERRATA = {("Galatians", 2, 20): [("neverthless", "nevertheless")]}
+
+
+def build_kjv_text(src, out):
+    """Index a Gutenberg-style plain-text KJV (eBook #10): `C:V text`, book titles in order."""
+    raw = open(src, encoding="utf-8", errors="replace").read()
+    m = re.search(r"\*\*\* ?START OF TH[EIS]+ PROJECT GUTENBERG[^\n]*\n", raw)
+    body = raw[m.end():] if m else raw
+    m = re.search(r"\*\*\* ?END OF TH[EIS]+ PROJECT GUTENBERG", body)
+    if m:
+        body = body[:m.start()]
+    lines = body.splitlines()
+
+    first_verse = next(i for i, l in enumerate(lines) if re.match(r"^\d+:\d+ ", l.strip()))
+    toc = {l.strip() for l in lines[:first_verse] if l.strip()}
+    toc = {t for t in toc if not re.match(r"(?i)^the (old|new) testament\b", t)}
+    # The table of contents lists every title a second time, so a walk from the top
+    # counts 132 headings and 66 empty books. The body starts at the LAST heading
+    # before the first verse — that one is Genesis's, not the contents' copy of it.
+    body_start = max(i for i in range(first_verse) if lines[i].strip() in toc)
+
+    streams, order = [], []
+    for line in lines[body_start:]:
+        t = line.strip()
+        if not t:
+            continue
+        if t in toc:
+            # A book's title can run to two lines. This edition prints 1 Samuel as
+            #     The First Book of Samuel
+            #     Otherwise Called:
+            #     The First Book of the Kings
+            # and that third line is also the heading of a LATER book. So a heading
+            # opens a new book only once the current one has actually begun — i.e.
+            # has a verse — which makes the alternate title part of Samuel's heading
+            # instead of an empty book stealing the name 1 Kings needs.
+            if not order or any(VERSE_MARK.search(x) for x in streams[-1]):
+                order.append(t); streams.append([])
+            continue
+        if streams:
+            streams[-1].append(t)
+
+    if len(order) != len(KJV_BOOKS):
+        raise SystemExit(f"expected {len(KJV_BOOKS)} book headings, found {len(order)}: "
+                         f"{order[:3]}… — the source is not the expected edition")
+
+    rows, seen, fixed = [], set(), []
+    for book, chunk in zip(KJV_BOOKS, streams):
+        parts = re.split(r"(\d+):(\d+) ", " ".join(chunk))
+        for i in range(1, len(parts), 3):
+            c, v, t = int(parts[i]), int(parts[i + 1]), clean(scrub(parts[i + 2]))
+            for wrong, right in PG10_ERRATA.get((book, c, v), ()):
+                if wrong in t:
+                    t = t.replace(wrong, right)
+                    fixed.append(f"{book} {c}:{v}  {wrong!r} -> {right!r}")
+            if t and (book, c, v) not in seen:
+                seen.add((book, c, v)); rows.append((book, c, v, t))
+    for line in fixed:
+        print(f"  errata applied: {line}")
+    with opener(out, "wt") as f:
+        for book, c, v, t in rows:
+            f.write(f"{book}\t{c}\t{v}\t{t}\n")
+    return f"{len(rows)} verses, {len(order)} books"
+
+
 def build_text(src, out, lines_per_block=40):
     """A .txt source indexed by line number.
 
@@ -100,9 +256,13 @@ def build_text(src, out, lines_per_block=40):
 
 
 def build_pages(pdf, out):
+    pages, report = strip_furniture(list(page_texts(pdf)))
+    for phrase, count in report:
+        print(f"  furniture dropped from {count} page(s): {phrase!r}")
     with opener(out, "wt") as f:
         n = 0
-        for page, text in page_texts(pdf):
+        for page, text in pages:
+            text = scrub(text)
             if text:
                 f.write(f"{page}\t{clean(text)}\n"); n += 1
     return f"{n} pages"
@@ -111,7 +271,11 @@ def build_pages(pdf, out):
 def build_kjv(pdf, out):
     """Accumulate each book's stream, then split it on {chapter:verse} markers."""
     streams, order, book = {}, [], None
-    for _, text in page_texts(pdf):
+    pages, report = strip_furniture(list(page_texts(pdf)))
+    for phrase, count in report:
+        print(f"  furniture dropped from {count} page(s): {phrase!r}")
+    for _, text in pages:
+        text = scrub(text)
         if not text:
             continue
         # Strip a leading "Page N" FIRST, then require the book name at position 0.
@@ -166,12 +330,18 @@ def verify(path):
         # only needs "N rows, locators ascending".
         locs = [r[0] for r in rows]
         ok = all(l.isdigit() for l in locs) and locs == sorted(locs, key=int)
+        furn = [r for r in rows if FURNITURE_RE.search(r[-1])]
         print(f"2-column index: {len(rows)} row(s), locators "
               f"{locs[0] if locs else '-'}..{locs[-1] if locs else '-'}")
+        if furn:
+            print(f"  PAGE FURNITURE IN {len(furn)} ROW(S), e.g. {furn[0][-1][:80]!r}")
+            ok = False
         if not ok:
             print("  LOCATORS NOT ASCENDING INTEGERS — a lookup would report the wrong place")
         print("  OK" if ok else "  NOT USABLE AS A CHECKER")
         return 0 if ok else 4
+
+    dirty = [r for r in rows if FURNITURE_RE.search(r[-1])]
 
     books = {r[0] for r in rows}
     missing = [b for b in KJV_BOOKS if b not in books]
@@ -187,6 +357,14 @@ def verify(path):
 
     print(f"kjv index: {len(rows)} verses, {len(books)} books, {len(chapters)} chapters")
     ok = True
+    if dirty:
+        # Fatal, and it has to be: this index passed every other check on 2026-09-10
+        # and still answered Philippians 3:5 with a web address in the middle of it.
+        print(f"  PAGE FURNITURE IN {len(dirty)} VERSE(S) — a correct quotation will be "
+              f"reported as drift:")
+        for r in dirty[:5]:
+            print(f"    {r[0]} {r[1]}:{r[2]}  {r[-1][:90]}")
+        ok = False
     if missing:
         print(f"  MISSING BOOKS ({len(missing)}): {missing}"); ok = False
     if extra:
@@ -219,11 +397,12 @@ def main():
         print("--out is required"); sys.exit(1)
     if not os.path.exists(src):
         print(f"no such file: {src}"); sys.exit(1)
-    if scheme != "text" and not src.lower().endswith(".pdf"):
+    if scheme not in ("text", "kjv-text") and not src.lower().endswith(".pdf"):
         print(f"scheme {scheme} reads a PDF; {os.path.basename(src)} is not one "
-              f"(use --scheme text)"); sys.exit(1)
+              f"(use --scheme text, or --scheme kjv-text for a Gutenberg KJV)"); sys.exit(1)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     got = (build_text(src, out) if scheme == "text" else
+           build_kjv_text(src, out) if scheme == "kjv-text" else
            build_kjv(src, out) if scheme == "kjv" else build_pages(src, out))
     print(f"{got} -> {out}")
     sys.exit(verify(out))

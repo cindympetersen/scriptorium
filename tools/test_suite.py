@@ -5067,6 +5067,76 @@ def reseal_fixtures():
     return 0
 
 
+def unit_furniture_and_body_scripture(tmp):
+    """The three faults of 2026-09-11, each pinned by a test.
+
+    1. A running header/footer landed INSIDE verse text ("of the stock of Israel,
+       [of] the www.holybooks.com Page 678 tribe of Benjamin"), so a correct
+       quotation of Philippians 3:5 was reported as drift. 684 verses of the shipped
+       KJV index carried it and every check passed them.
+    2. `refindex --verify` had no opinion about furniture, so a contaminated index
+       could be built, verified, shipped and trusted.
+    3. `check_scripture` read the footnotes only, so a piece that quotes scripture in
+       its prose could report "0 problems" having checked none of what a reader sees.
+    """
+    import importlib.util, os, gzip
+
+    def load(name):
+        spec = importlib.util.spec_from_file_location(
+            name, os.path.join(os.path.dirname(__file__), name + '.py'))
+        m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+        return m
+
+    RI = load('refindex')
+
+    # 1. the frequency stripper removes what repeats and keeps what does not
+    # Each page carries the SAME running furniture and DIFFERENT work text — which is
+    # the whole distinction the stripper runs on. A fixture whose pages are identical
+    # makes the work furniture by definition and proves nothing.
+    work = ['beginning God created the heaven', 'earth was without form and void', 'God said Let there be light', 'God divided the light from darkness', 'evening and the morning were first', 'waters be gathered unto one place', 'dry land appear and it was so', 'earth bring forth grass the herb', 'lights in the firmament of heaven', 'greater light to rule the day']
+    pages = [(i, f"www.holybooks.com Page {i} {w}") for i, w in enumerate(work, 1)]
+    cleaned, report = RI.strip_furniture(pages)
+    check('furniture: the repeated header is stripped from every page',
+          all('holybooks' not in t for _, t in cleaned), str(cleaned[:1]))
+    check('furniture: the work\'s own words survive',
+          all(w in t for w, (_, t) in zip(work, cleaned)), str(cleaned[:2]))
+    check('furniture: the stripper reports what it dropped', bool(report), str(report))
+
+    # a phrase on ONE page is not furniture, and deleting it would delete the work
+    pages = [(1, 'a singular sentence appears only here')] + \
+            [(i, f'common running head page {i} ordinary text') for i in range(2, 12)]
+    cleaned, _ = RI.strip_furniture(pages)
+    check('furniture: a phrase on one page is left alone',
+          'a singular sentence appears only here' in cleaned[0][1], cleaned[0][1])
+
+    # 2. --verify refuses an index that still carries furniture
+    bad = os.path.join(tmp, 'dirty.tsv')
+    with open(bad, 'w', encoding='utf-8') as f:
+        f.write('Genesis\t1\t1\tIn the beginning www.holybooks.com God created\n')
+    check('verify: a contaminated index cannot pass', RI.verify(bad) != 0, 'verify returned 0')
+
+    # 3. check_scripture reads the BODY, not only the notes
+    CS = load('check_scripture')
+    idx = os.path.join(tmp, 'mini.tsv')
+    with open(idx, 'w', encoding='utf-8') as f:
+        f.write('Genesis\t50\t15\tAnd when Joseph\u2019s brethren saw that their father was '
+                'dead, they said, Joseph will peradventure hate us\n')
+    piece = os.path.join(tmp, 'piecebody'); os.makedirs(piece, exist_ok=True)
+    with open(os.path.join(piece, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write('# T\n\n*scaffold*\n\n---\n\n'
+                'The text says *when Joseph\u2019s brethren saw that their father was dead, '
+                'they said, Joseph will peradventure hate us*.[^g]\n\n'
+                '[^g]: Genesis 50:15, KJV.\n')
+    import subprocess, sys
+    r = subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__),
+                        'check_scripture.py'), piece, '--index', idx],
+                       capture_output=True, text=True)
+    check('check_scripture: a body quotation is checked', 'MATCH' in r.stdout, r.stdout[-300:])
+    check('check_scripture: the body count reaches the summary',
+          '1 quotation(s) checked' in r.stdout or '2 quotation(s) checked' in r.stdout,
+          r.stdout[-200:])
+
+
 def main():
     if '--reseal-fixtures' in sys.argv:
         return reseal_fixtures()
@@ -5089,6 +5159,7 @@ def main():
         unit_reference_add(tmp)
         unit_quotes(tmp)
         unit_quotes_false_positives(tmp)
+        unit_furniture_and_body_scripture(tmp)
         unit_notes(tmp)
         unit_outlet_urls(tmp)
         unit_live_urls(tmp)
