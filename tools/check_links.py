@@ -54,6 +54,14 @@ TRAILING = '.,;:!?\'"*_`'                              # prose punctuation glued
 # checking them would mean this tool reports failures on files that are right.
 EDITOR_RE = re.compile(r'/publish/(?:post|posts)/')
 
+# A markdown link whose URL is split across lines. It still PARSES — and that is the trap,
+# because every tool here normalises whitespace before it looks, so the URL this file's own
+# LINK_RE never matches is silently checked by nothing. The converter joins the two halves
+# with a SPACE, which publishes as %20 inside the address: a dead link in a live post.
+# Measured 2026-09-13 on what-holds-you-here, where a review's re-flow broke
+# `…/p/where-the-timelines-agree` after a hyphen and every check still reported 0 dead.
+WRAPPED_RE = re.compile(r'\]\(\s*(https?://[^)]*?\n[^)]*?)\)')
+
 UA = {'User-Agent': 'writing-desk-link-check/1.0'}
 
 
@@ -165,6 +173,20 @@ def main():
     for label, path in sources:
         for u in extract(open(path).read()):
             where.setdefault(u, set()).add(label)
+    # BEFORE the early return: a piece whose only cross-link is a wrapped one has no
+    # checkable urls at all, and returning early would report "nothing to check" about a
+    # draft carrying a link that is about to publish broken.
+    wrapped = []
+    for label, path in sources:
+        for m in WRAPPED_RE.finditer(open(path).read()):
+            wrapped.append((label, ' '.join(m.group(1).split())))
+    if wrapped:
+        print(f"{len(wrapped)} link(s) have a URL SPLIT ACROSS LINES — the converter joins the")
+        print("halves with a space, so each publishes as a dead %20 address:")
+        for label, u in wrapped:
+            print(f"  {label:12s}  {u[:100]}")
+        print("Re-wrap so the URL sits on one line; the text before it can break instead.\n")
+
     urls = [u for u in sorted(where) if not EDITOR_RE.search(u)]
     skipped_editor = sum(1 for u in where if EDITOR_RE.search(u))
     if '--all' not in sys.argv and host:
@@ -172,7 +194,7 @@ def main():
 
     if not urls:
         print(f"no in-body cross-links to check ({'host ' + host if host else 'no host in manifest'})")
-        return
+        sys.exit(4 if wrapped else 0)
 
     bad = []
     for u in urls:
@@ -192,6 +214,8 @@ def main():
     # about a file that is not wrong, which is how a checker gets switched off.
     raw = open(draft).read()
     wrong = [(u, f) for u, f in unrenderable(raw) if '--all' in sys.argv or not host or host in u]
+    if wrapped:
+        bad.append(('wrapped', 'url split across lines', 'draft.md'))
     if wrong:
         print(f"\n{len(wrong)} link(s) in draft.md resolve but will PUBLISH AS PLAIN TEXT —")
         print("the converter renders [text](url) and nothing else:")

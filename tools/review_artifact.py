@@ -144,19 +144,32 @@ def manifest(piece_dir):
 
 
 def split_draft(text):
-    """Publishable body only — the scaffold above the first `---` never reaches a reader."""
+    """Publishable body only — the scaffold above the first `---` never reaches a reader.
+
+    Footnote definitions are lifted out WHEREVER they sit, not only from a tail block: this
+    house also files each section's notes at the end of that section (The Highest Peak, 43
+    notes across nine movements). The older tail-only split treated the first definition as
+    the start of the notes and swallowed every later movement's prose into them, so a piece
+    laid out that way rendered with eight of its nine sections missing and every footnote
+    reported unreferenced. A block is a definition when it opens with `[^key]:`, and an
+    indented block immediately after one is that note's continuation.
+    """
     parts = text.split('\n---\n', 1)
     body = (parts[1] if len(parts) > 1 else text).strip()
-    m = re.search(r'^\[\^[\w-]+\]:', body, re.M)
-    if not m:
-        return body, {}
-    prose, tail = body[:m.start()].strip(), body[m.start():]
-    starts = [(mm.group(1), mm.start()) for mm in re.finditer(r'^\[\^([\w-]+)\]:', tail, re.M)]
-    defs = {}
-    for i, (k, st) in enumerate(starts):
-        en = starts[i + 1][1] if i + 1 < len(starts) else len(tail)
-        defs[k] = re.sub(r'^\[\^[\w-]+\]:\s*', '', tail[st:en].strip())
-    return prose, defs
+    prose_blocks, defs, cur = [], {}, None
+    for block in re.split(r'\n\s*\n', body):
+        if not block.strip():
+            continue
+        m = re.match(r'^\[\^([\w-]+)\]:\s*', block)
+        if m:
+            cur = m.group(1)
+            defs[cur] = block[m.end():].strip()
+        elif cur is not None and re.match(r'^[ \t]', block):
+            defs[cur] += '\n\n' + block.strip()
+        else:
+            cur = None
+            prose_blocks.append(block)
+    return '\n\n'.join(prose_blocks).strip(), defs
 
 
 def inline(t, num, notes=True):
@@ -364,9 +377,14 @@ LINK = re.compile(r'\[[^\]]*\]\([^)\s]*\)')
 def rewrap(block, width):
     """Re-flow one block at the house measure, keeping its kind.
 
-    A markdown link is never broken across lines. It still PARSES broken — the converter
-    normalises whitespace — but no draft on this desk carries one that way, and a wrapped
-    link is harder to grep and harder to read in a diff.
+    A markdown link is never broken across lines, and the spaces inside one are hidden from
+    the wrapper to keep it that way — but hiding the SPACES is not enough, because
+    `textwrap` also breaks on hyphens and on over-long words. Measured 2026-09-13: applying a
+    review re-flowed a footnote and split
+    `https://elmuffin.substack.com/p/where-the-timelines-agree` after a hyphen, which the
+    Substack converter then emitted as `…where-the-timelines-%20agree` — a dead link in a
+    composed post. `check_links` could not see it either, because it normalises whitespace
+    before it looks. So: no hyphen breaks, no long-word breaks.
     """
     import textwrap
     if block.lstrip().startswith(('#', '![')):
@@ -382,10 +400,12 @@ def rewrap(block, width):
     lead = re.match(r'\s*', block).group(0)
     if re.match(r'\s*>', block):                    # blockquote
         text = ' '.join(l.lstrip().lstrip('>').strip() for l in block.strip().split('\n'))
-        return unhide(lead + '\n'.join('> ' + l for l in textwrap.wrap(text, width - 2)))
+        return unhide(lead + '\n'.join('> ' + l for l in textwrap.wrap(
+            text, width - 2, break_on_hyphens=False, break_long_words=False)))
     text = ' '.join(block.split())
     indent = '    ' if re.match(r'\[\^[\w-]+\]:', text) else ''
-    return unhide(lead + '\n'.join(textwrap.wrap(text, width, subsequent_indent=indent)))
+    return unhide(lead + '\n'.join(textwrap.wrap(
+        text, width, subsequent_indent=indent, break_on_hyphens=False, break_long_words=False)))
 
 
 def embed_file(piece_dir, rel, width=1400):

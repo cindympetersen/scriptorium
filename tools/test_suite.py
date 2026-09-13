@@ -5140,6 +5140,49 @@ def unit_furniture_and_body_scripture(tmp):
           r.stdout[-200:])
 
 
+def unit_wrapped_links(tmp):
+    """A markdown link whose URL is split across lines — published as a dead %20 address.
+
+    Measured 2026-09-13 on what-holds-you-here: applying a review re-flowed a footnote and
+    textwrap broke `…/p/where-the-timelines-agree` after a HYPHEN. The spaces inside a link
+    were hidden from the wrapper; hyphens were not. The Substack converter then joined the
+    halves with a space, and the composed post carried a dead link — while `check_links`
+    reported 0 dead, because its LINK_RE (`[^)\\s]+`) cannot match a URL with a newline in
+    it, so the link was not checked at all. Two holes, one shape: the tool that re-flows and
+    the tool that checks were both blind to the same break.
+    """
+    import importlib.util, os, subprocess, sys
+
+    def load(name):
+        spec = importlib.util.spec_from_file_location(
+            name, os.path.join(os.path.dirname(__file__), name + '.py'))
+        m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+        return m
+
+    RA = load('review_artifact')
+    url = 'https://elmuffin.substack.com/p/where-the-timelines-agree'
+    block = ('[^lot]: Luke 17:31-33, KJV. Verse 33 is close kin to Matthew 10:39, which '
+             f'[*Where the Timelines Agree*]({url}) references without quoting in its last '
+             'movement; the body quotes Luke\'s form, so the two are not the same move.')
+    out = RA.rewrap(block, 96)
+    check('rewrap: a URL is never split, not even at a hyphen',
+          all(url in line for line in [' '.join(out.split())]) and
+          not any(l.rstrip().endswith('-') and 'http' in l for l in out.split('\n')),
+          out)
+    check('rewrap: the block is still wrapped to the measure',
+          max(len(l) for l in out.split('\n')) <= 110, out)
+
+    # check_links sees a wrapped URL, and says so even when nothing else is checkable
+    d = os.path.join(tmp, 'wrapped'); os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write('# T\n\n*scaffold*\n\n---\n\nSee [*A*](https://example.com/a-\n    b) here.\n')
+    r = subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), 'check_links.py'), d],
+                       capture_output=True, text=True)
+    check('check_links: a URL split across lines is a finding',
+          'SPLIT ACROSS LINES' in r.stdout and r.returncode != 0,
+          f'rc={r.returncode} {r.stdout[-200:]}')
+
+
 def main():
     if '--reseal-fixtures' in sys.argv:
         return reseal_fixtures()
@@ -5163,6 +5206,7 @@ def main():
         unit_quotes(tmp)
         unit_quotes_false_positives(tmp)
         unit_furniture_and_body_scripture(tmp)
+        unit_wrapped_links(tmp)
         unit_notes(tmp)
         unit_outlet_urls(tmp)
         unit_live_urls(tmp)
