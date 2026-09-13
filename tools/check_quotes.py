@@ -60,6 +60,12 @@ SURNAME_STOP = {
     "german", "gospel", "gospels", "bible", "creed", "creeds", "nicene", "ancient",
     "modern", "first", "second", "third", "complete", "selected", "collected",
     "internet", "archive", "project", "gutenberg", "library", "classics", "series",
+    # Corporate-author and series words. A bolded translator can be a body rather than a
+    # person — "**Fathers of the English Dominican Province**", "**Sacred Books of the
+    # East**" — and its generic words name half the shelf. "fathers" alone would tie the
+    # Summa to every Ante-Nicene Fathers footnote. (Added 2026-09-13 with the title-regex
+    # fix, which is what first let these reach the alias table.)
+    "fathers", "province", "dominican", "society", "committee", "commission",
     "volume", "edition", "editions", "reprint", "translation", "translated", "revised",
     "expanded", "commemorative", "stories", "story", "essays", "lectures", "letters",
     "notes", "texts", "thing", "things", "world", "america", "american", "british",
@@ -187,36 +193,76 @@ def aliases(work_cell, filename):
     cites, not the one that happened to share the longest run of ordinary English.
     """
     al = {}
-    titles = re.findall(r"\*([^*]{4,})\*", work_cell)
+    # A TITLE IS SINGLE-ASTERISK EMPHASIS, AND THE ASTERISKS MUST NOT BE A BOLD PAIR.
+    # `\*([^*]{4,})\*` matches the INSIDE of `**Marmaduke Pickthall**` — the opening
+    # `*` fails, the second one succeeds, and a bolded AUTHOR is parsed as a title. That
+    # is not cosmetic: the author loop below refuses to alias a word that is already a
+    # title word, so every bolded surname in the manifest suppressed ITSELF. Measured
+    # 2026-09-13: **20 of 52 rows** mis-parsed this way, and the seven translators the
+    # house bolds — Pickthall, Pusey, Swete, Griffith, Seager, Smith(–Van Dyck) — could
+    # not be named by surname at all. That is why four Qur'an quotations in
+    # jealous-of-a-calf, against a held and indexed Pickthall, were reported as nothing.
+    # It also invented titles out of the text BETWEEN two bold spans (", tr. ",
+    # " (Books I–VI) — tr. ", "p. 82"), each a 100-weight alias made of punctuation.
+    titles = re.findall(r"(?<!\*)\*(?!\*)([^*]{4,})\*(?!\*)", work_cell)
+    bolds = re.findall(r"\*\*([^*]{4,})\*\*", work_cell)
+
+    def prefixes(n, weight):
+        """A footnote shortens a name: the manifest holds *The Spiritual Exercises of
+        St. Ignatius of Loyola* and the note says *The Spiritual Exercises*. Without the
+        prefix the source reads as NOT HELD while it sits on the shelf.
+
+        A prefix must still be a NAME. Two words of a title is not: "Book I Part 3"
+        yielded the prefix "book i", which matched any footnote containing the word
+        "book", and tied Lane's Arabic lexicon to a third of the corpus — where its
+        degraded OCR then produced a finding every time. So: three words minimum, and at
+        least one of them a real word of its own.
+        """
+        w = n.split()
+        for k in (4, 3):
+            if len(w) > k:
+                pre = w[:k]
+                if any(len(x) >= 5 and x not in SURNAME_STOP for x in pre):
+                    al.setdefault(" ".join(pre), weight)
+
     for t in titles:
         n = norm(t)
         if len(n.split()) >= 2:
             al[n] = max(al.get(n, 0), 100)
-            # A footnote shortens a title: the manifest holds *The Spiritual Exercises
-            # of St. Ignatius of Loyola* and the note says *The Spiritual Exercises*.
-            # Without the prefix the source reads as NOT HELD while it sits on the shelf.
-            # A prefix must still be a NAME. Two words of a title is not: "Book I
-            # Part 3" yielded the prefix "book i", which matched any footnote
-            # containing the word "book", and tied Lane's Arabic lexicon to a third of
-            # the corpus — where its degraded OCR then produced a finding every time.
-            # So: three words minimum, and at least one of them a real word of its own.
-            w = n.split()
-            for k in (4, 3):
-                if len(w) > k:
-                    pre = w[:k]
-                    if any(len(x) >= 5 and x not in SURNAME_STOP for x in pre):
-                        al.setdefault(" ".join(pre), 80)
-    for t in re.findall(r"\*\*([^*]{4,})\*\*", work_cell):
+            prefixes(n, 80)
+    for t in bolds:
         n = norm(t)
         if len(n.split()) >= 2:
             al[n] = max(al.get(n, 0), 60)
+            # A BOLD SPAN TAKES PREFIXES TOO, and it has to. The house bolds a SERIES
+            # in the author position — **Sacred Books of the East vol. XV** — and a
+            # footnote names it without the volume word: *Sacred Books of the East* XV.
+            # While bold was mis-parsed as italic this worked by accident; once bold
+            # stopped being a title it broke, and a Brihadaranyaka quotation that had
+            # been matching against Müller went to NOT HELD. (Measured 2026-09-13 on
+            # jealous-of-a-calf, in the same run that fixed the title regex.)
+            prefixes(n, 50)
 
     # The author position: after the em-dash that follows the title, or after "tr.".
     tail = work_cell
     m = re.search(r"—|\btr\.\s", work_cell)
     if m:
         tail = work_cell[m.end():]
-    title_words = {w for t in titles for w in norm(t).split()}
+    # A QUOTED TITLE IN THE AUTHOR POSITION IS A CONTAINED WORK, NOT AN AUTHOR. The
+    # periodical rows name their articles there — "The Alleged Sojourn of Christ in
+    # India," — and every capitalized word in one would otherwise become a surname-weight
+    # alias for the whole volume. Until the title regex above was fixed those words were
+    # suppressed by accident, as part of a junk "title"; they must now be excluded on
+    # purpose.
+    tail = re.sub(r"[\u201c\"][^\u201d\"]{4,}[\u201d\"]", " ", tail)
+    # Words already spoken for by a NAME must not also become surname-weight aliases.
+    # That covers every italic title, and every bold span EXCEPT the last one — which is
+    # the author position by house convention (*Title* — **Author**, *Title* — series,
+    # tr. **Translator**). Without the exception a bolded translator suppresses his own
+    # surname; without the rule a bolded series contributes "sacred" as an alias for a
+    # whole volume.
+    spoken_for = list(titles) + bolds[:-1]
+    title_words = {w for t in spoken_for for w in norm(t).split()}
     for w in re.findall(r"\b([A-Z][a-zA-Z'’-]{4,})\b", tail):
         n = norm(w)
         if n and n not in SURNAME_STOP and n not in title_words:
