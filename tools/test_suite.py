@@ -444,31 +444,50 @@ def unit_shelf(tmp):
           '2 already on the shelf' in buf.getvalue(), buf.getvalue()[-120:])
 
     # ---- pull, and the two failures that matter ---------------------------
-    os.remove(os.path.join(refs, 'held.txt'))
-    os.remove(os.path.join(refs, '.index', 'held.tsv.gz'))
+    # A FRESH TREE PER SCENARIO, never a delete. ci_check.py forbids deletion calls in
+    # this file — including in a comment, since the guard reads lines — and it is right
+    # to: a test that deletes by path is one refactor away from deleting something real.
+    def tree(name, with_source=None):
+        h = os.path.join(tmp, name)
+        os.makedirs(os.path.join(h, 'references', '.index'))
+        os.makedirs(os.path.join(h, 'books', 'tst'))
+        open(os.path.join(h, 'references', 'README.md'), 'w').write(
+            '# R\n\n| File | Book | Work | Edition / provenance | Added | Redistribution |\n'
+            '|---|---|---|---|---|---|\n'
+            f'| [held.txt](held.txt) | tst | *A Work* — An Author (1999) | '
+            f'sha256 `{digest}` | 2026-09-13 | ✅ Public domain. Safe. |\n')
+        if with_source is not None:
+            open(os.path.join(h, 'references', 'held.txt'), 'wb').write(with_source)
+        return h
+
+    empty = tree('shelf-pull')
+    R.root = lambda: empty
     with contextlib.redirect_stdout(io.StringIO()):
         rc = R.cmd_pull([])
     check('shelf: pull restores a source the manifest names and the disk lacks',
-          rc == 0 and open(os.path.join(refs, 'held.txt'), 'rb').read() == body)
+          rc == 0 and open(os.path.join(empty, 'references', 'held.txt'), 'rb').read() == body)
 
     # The shelf hands back something else. A shelf that can do that is worse than an
     # empty one, because the file then LOOKS held.
-    os.remove(os.path.join(refs, 'held.txt'))
+    liar = tree('shelf-liar')
+    R.root = lambda: liar
     fake.objs[f'refs/{digest}/held.txt'] = b'not the right bytes at all'
     with contextlib.redirect_stdout(io.StringIO()) as buf:
         rc = R.cmd_pull([])
     check('shelf: bytes that do not hash to the row are NOT written',
-          not os.path.exists(os.path.join(refs, 'held.txt')) and rc == 4,
+          not os.path.exists(os.path.join(liar, 'references', 'held.txt')) and rc == 4,
           buf.getvalue()[-160:])
 
     # And it never overwrites a local copy that differs — an annotated or re-OCR'd file
     # is the one thing here that no version history holds.
-    open(os.path.join(refs, 'held.txt'), 'wb').write(b'my own annotated copy')
+    mine = tree('shelf-mine', with_source=b'my own annotated copy')
+    R.root = lambda: mine
+    fake.objs[f'refs/{digest}/held.txt'] = body
     with contextlib.redirect_stdout(io.StringIO()) as buf:
         R.cmd_pull([])
     check('shelf: a differing local file is left alone, not replaced',
-          open(os.path.join(refs, 'held.txt'), 'rb').read() == b'my own annotated copy',
-          buf.getvalue()[-160:])
+          open(os.path.join(mine, 'references', 'held.txt'), 'rb').read()
+          == b'my own annotated copy', buf.getvalue()[-160:])
 
 
 def unit_canons(tmp):
