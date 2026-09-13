@@ -69,10 +69,13 @@ That is why the notes above were *skipped* rather than *checked*: no source matc
 recognize one. Fixed 2026-09-13 (`check_quotes.py`). Corpus after: **MATCH 110 → 118,
 DRIFT 9 → 17, NOT HELD 35 → 46**, across 25 of 46 texts, suite green.
 
-**The fix immediately found three misquotations that had been invisible**, two of them on
-live posts — a rendering of Pickthall reading *Allah* where the held edition reads *God*,
-and an Augustine quotation reading *"but not yet"* where Pusey reads *"only not yet"*. The
-apparatus was correct; one regex kept it from ever running.
+**The fix immediately found four quotations that drift from the source they cite, all four
+on live posts** — three renderings of Pickthall reading *Allah* where the held edition
+reads *God* (*Jealous of a Calf*, *The Author Is Not a Character*), and an Augustine
+quotation reading *"Grant me chastity and continency, but not yet"* where Pusey reads
+*"Give me chastity and continency, only not yet"* (*Not Yet*, whose title is that phrase).
+The manifest had already recorded Pusey's wording, in the row's own prose. The apparatus
+was correct throughout; one regex kept it from ever running.
 
 ### What remains, and it is this document's subject
 
@@ -235,7 +238,7 @@ house avoids elsewhere, and a lingering alias is the name a future session will 
 
 **Standing today: four pieces carry loci nothing can resolve** — ten Qur'an loci across
 *Jealous of a Calf* and *The Author Is Not a Character*, and Gita loci in *False Light* and
-*Krishna Is Not Christ*. Two of those are live posts. The finding is the deliverable; the
+*Krishna Is Not Christ*. **All four are live posts.** The finding is the deliverable; the
 indexes are the fix.
 
 ## What this does not do
