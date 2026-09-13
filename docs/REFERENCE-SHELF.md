@@ -1,10 +1,15 @@
 # The reference shelf — one shelf per desk, with a private copy off the machine
 
-> **Status** (2026-09-13). **Part one — one shelf at the desk root — is BUILT.** Sources,
-> indexes and the manifest live in `references/`; the book is a manifest column;
-> `references.py check` is green on 52 files and 52 rows. **Part two — the S3 shelf — is
-> not.** `rehash`, the bucket and `push`/`pull` are still design. Read part two as the
-> argument for building it and the spec to build it against.
+> **Status** (2026-09-13). **Part one — one shelf at the desk root — is BUILT**, and so is
+> everything in part two that runs on this machine: `rehash`, `push`, `pull`, the shelf
+> domain in `check`, and the CDK stack (`infra/lib/reference-shelf-stack.ts`, synthesizes
+> clean). **The stack is NOT DEPLOYED and nothing has been uploaded** — that creates real
+> resources in a real account and is the author's call, not a session's. `check` reports
+> the shelf as NOT CONFIGURED and names what the desk is one disk away from losing.
+>
+> **To turn it on:** `cd infra && npx cdk deploy DeskReferenceShelf`, take the
+> `ShelfBucketName` output into `references/shelf.yaml` (shape below, and
+> `references.py push` prints it), then `references.py push --dry-run`.
 
 The desk holds source texts so that a quotation is checked against a file rather than
 recalled, and the folder that holds them **denies by default**: `*`, plus one `!` line per

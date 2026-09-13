@@ -363,6 +363,114 @@ def unit_references(tmp):
           R.text_layer_verdict(src, out) is None)
 
 
+def unit_shelf(tmp):
+    """push/pull against a fake bucket. No AWS, and the refusals are the point.
+
+    The shelf holds the half of the references that can never be committed, so the
+    failures worth testing are the ones where it would hand back the WRONG bytes or
+    overwrite the right ones — those are unrecoverable, and everything else is a retry.
+    """
+    import io, contextlib, hashlib, importlib.util, os
+
+    spec = importlib.util.spec_from_file_location(
+        'references', os.path.join(os.path.dirname(__file__), 'references.py'))
+    R = importlib.util.module_from_spec(spec); spec.loader.exec_module(R)
+
+    home = os.path.join(tmp, 'shelf-inst')
+    refs = os.path.join(home, 'references')
+    os.makedirs(os.path.join(refs, '.index'))
+    os.makedirs(os.path.join(home, 'books', 'tst'))
+    body = b'a held source, at length. ' * 40
+    open(os.path.join(refs, 'held.txt'), 'wb').write(body)
+    digest = hashlib.sha256(body).hexdigest()
+    open(os.path.join(refs, '.index', 'held.tsv.gz'), 'wb').write(b'not really gzip')
+
+    def manifest(dig, verdict='✅ Public domain. Safe to quote and redistribute.'):
+        open(os.path.join(refs, 'README.md'), 'w').write(
+            '# R\n\n| File | Book | Work | Edition / provenance | Added | Redistribution |\n'
+            '|---|---|---|---|---|---|\n'
+            f'| [held.txt](held.txt) | tst | *A Work* — An Author (1999) | '
+            f'sha256 `{dig}` | 2026-09-13 | {verdict} |\n')
+    manifest(digest)
+
+    R.root = lambda: home
+    check('shelf: the key is the hash, and the leaf keeps it legible',
+          R.shelf_key(digest, 'held.txt') == f'refs/{digest}/held.txt')
+    check('shelf: an index is keyed by the SOURCE hash, so it is unambiguous',
+          R.shelf_key(digest, 'held.txt', index=True)
+          == f'refs/{digest}/.index/held.tsv.gz')
+
+    ok, refused = R._shelf_targets(home)
+    check('shelf: a well-formed row is addressable', len(ok) == 1 and not refused)
+
+    manifest(digest[:16])
+    ok, refused = R._shelf_targets(home)
+    check('shelf: a TRUNCATED digest is refused — a prefix is not an address',
+          not ok and refused and 'truncated' in refused[0][1], str(refused))
+
+    manifest('f' * 64)
+    ok, refused = R._shelf_targets(home)
+    check('shelf: a digest that disagrees with the file is refused',
+          not ok and refused and 'MISMATCH' in refused[0][1], str(refused))
+
+    manifest(digest, verdict='held on the shelf')      # no ✅ / ⚠️ / ❌
+    ok, refused = R._shelf_targets(home)
+    check('shelf: a row with no redistribution verdict is refused, not guessed at',
+          not ok and refused and 'verdict' in refused[0][1], str(refused))
+    manifest(digest)
+
+    # ---- a fake bucket -----------------------------------------------------
+    class Fake:
+        def __init__(self): self.objs = {}
+        def head_object(self, Bucket, Key):
+            if Key not in self.objs: raise RuntimeError('404')
+            return {}
+        def upload_file(self, src, Bucket, Key):
+            self.objs[Key] = open(src, 'rb').read()
+        def download_file(self, Bucket, Key, dest):
+            if Key not in self.objs: raise RuntimeError('404')
+            open(dest, 'wb').write(self.objs[Key])
+    fake = Fake()
+    R.shelf_config = lambda r=None: {'bucket': 'b', 'region': 'us-east-1'}
+    R.shelf_client = lambda cfg: fake
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        rc = R.cmd_push([])
+    check('shelf: push uploads the source and its index', rc == 0 and len(fake.objs) == 2,
+          str(sorted(fake.objs)))
+    with contextlib.redirect_stdout(io.StringIO()) as buf:
+        R.cmd_push([])
+    check('shelf: a second push uploads nothing — content addressing makes it idempotent',
+          '2 already on the shelf' in buf.getvalue(), buf.getvalue()[-120:])
+
+    # ---- pull, and the two failures that matter ---------------------------
+    os.remove(os.path.join(refs, 'held.txt'))
+    os.remove(os.path.join(refs, '.index', 'held.tsv.gz'))
+    with contextlib.redirect_stdout(io.StringIO()):
+        rc = R.cmd_pull([])
+    check('shelf: pull restores a source the manifest names and the disk lacks',
+          rc == 0 and open(os.path.join(refs, 'held.txt'), 'rb').read() == body)
+
+    # The shelf hands back something else. A shelf that can do that is worse than an
+    # empty one, because the file then LOOKS held.
+    os.remove(os.path.join(refs, 'held.txt'))
+    fake.objs[f'refs/{digest}/held.txt'] = b'not the right bytes at all'
+    with contextlib.redirect_stdout(io.StringIO()) as buf:
+        rc = R.cmd_pull([])
+    check('shelf: bytes that do not hash to the row are NOT written',
+          not os.path.exists(os.path.join(refs, 'held.txt')) and rc == 4,
+          buf.getvalue()[-160:])
+
+    # And it never overwrites a local copy that differs — an annotated or re-OCR'd file
+    # is the one thing here that no version history holds.
+    open(os.path.join(refs, 'held.txt'), 'wb').write(b'my own annotated copy')
+    with contextlib.redirect_stdout(io.StringIO()) as buf:
+        R.cmd_pull([])
+    check('shelf: a differing local file is left alone, not replaced',
+          open(os.path.join(refs, 'held.txt'), 'rb').read() == b'my own annotated copy',
+          buf.getvalue()[-160:])
+
+
 def unit_canons(tmp):
     """The canon records, and the one duplication they are allowed to have.
 
@@ -5298,6 +5406,7 @@ def main():
         unit_commonmark(tmp)
         unit_references(tmp)
         unit_canons(tmp)
+        unit_shelf(tmp)
         unit_reference_add(tmp)
         unit_quotes(tmp)
         unit_quotes_false_positives(tmp)

@@ -40,6 +40,8 @@ USAGE
   references.py list [--book <name>] [--unindexed]
   references.py index <file-or-path> [--scheme ...]        # (re)build one index
   references.py search "<phrase>" [--book <name>] [--source <substr>] [-n <hits>]
+  references.py push [--book <b>] [--dry-run] [--no-indexes]
+  references.py pull [<file>…] [--book <b>] [--indexes-only]
   references.py rehash [--dry-run] [--force]               # full sha256 into every row
   references.py check                                      # manifest ↔ disk ↔ gitignore
                                                            #   ↔ index ↔ digest
@@ -687,6 +689,205 @@ def cmd_search(argv):
     return 0
 
 
+# ---------------------------------------------------------------- the shelf (S3)
+
+SHELF_CONFIG = os.path.join("references", "shelf.yaml")
+
+SHELF_HELP = """no shelf configured. The bucket is defined in infra/lib/reference-shelf-stack.ts
+and deployed as the DeskReferenceShelf stack; its output names the bucket. Then write
+references/shelf.yaml:
+
+  shelf:
+    bucket: desk-references-<account>
+    region: us-east-1
+    aws_profile: muffinlabs      # SSO, as the store does. No long-lived keys on disk.
+
+Deliberately NOT folded into publishing/store.yaml: that file describes the public read
+path, and reading a config should make obvious which bucket the world can see."""
+
+
+def shelf_config(r=None):
+    """The shelf's bucket, or None. Never invents a default — an unconfigured shelf is a
+    state to report, not one to guess at."""
+    r = r or root()
+    p = os.path.join(r, SHELF_CONFIG)
+    if not os.path.exists(p):
+        return None
+    try:
+        import yaml
+    except ImportError:
+        print("shelf: PyYAML missing; pip install pyyaml")
+        return None
+    with open(p, encoding="utf-8") as f:
+        cfg = (yaml.safe_load(f) or {}).get("shelf") or {}
+    return cfg if cfg.get("bucket") else None
+
+
+def shelf_client(cfg):
+    try:
+        import boto3
+    except ImportError:
+        print("shelf: boto3 missing; pip install boto3")
+        return None
+    sess = boto3.Session(profile_name=cfg.get("aws_profile") or None,
+                         region_name=cfg.get("region") or None)
+    return sess.client("s3")
+
+
+def shelf_key(digest, name, index=False):
+    """refs/<sha256>/<filename>, and the index under the SOURCE's hash.
+
+    The hash prefix carries integrity and makes upload idempotent; the filename leaf keeps
+    a console listing legible. There is no book in the key and there would not have been
+    one even before the shelf was consolidated — content addressing dedupes across books
+    whether or not the disk does.
+    """
+    if index:
+        stem = re.sub(r"\.(pdf|txt|md|html?|epub)$", "", name, flags=re.I)
+        return f"refs/{digest}/{INDEX_DIR}/{stem}.tsv.gz"
+    return f"refs/{digest}/{name}"
+
+
+def _shelf_targets(r):
+    """(row, path, digest) for every manifest row this tool can address.
+
+    A row is REFUSED, not guessed at, when it has no redistribution verdict — `check`
+    already treats that as restricted, and `push` must not be the tool that quietly
+    settles a question the manifest has left open — or when its digest is absent,
+    truncated, or disagrees with the file. An address that is not the file's own hash is
+    not an address.
+    """
+    ok, refused = [], []
+    by_name = {x["file"]: x for x in rows(r) if x.get("file") and "unparsed" not in x}
+    for f in files_on_disk(r):
+        row = by_name.get(f)
+        if not row:
+            refused.append((f, "no manifest row")); continue
+        if not row.get("verdict_stated"):
+            refused.append((f, "no redistribution verdict in its row")); continue
+        d = row.get("digest")
+        path = os.path.join(refdir(r), f)
+        if not d:
+            refused.append((f, "no digest in its row — `references.py rehash`")); continue
+        if len(d) < 64:
+            refused.append((f, "truncated digest — `references.py rehash`")); continue
+        if sha256(path) != d:
+            refused.append((f, "DIGEST MISMATCH — the row describes other bytes")); continue
+        ok.append((row, path, d))
+    return ok, refused
+
+
+def cmd_push(argv):
+    """Upload every held source the shelf does not already have."""
+    r = root()
+    cfg = shelf_config(r)
+    if not cfg:
+        print(SHELF_HELP); return 1
+    s3 = shelf_client(cfg)
+    if not s3:
+        return 1
+    dry = "--dry-run" in argv
+    book = argv[argv.index("--book") + 1] if "--book" in argv else None
+    with_idx = "--no-indexes" not in argv
+    bucket = cfg["bucket"]
+    ok, refused = _shelf_targets(r)
+    if book:
+        ok = [t for t in ok if t[0].get("book") == book]
+    sent = skipped = 0
+    for row, path, d in ok:
+        name = row["file"]
+        items = [(shelf_key(d, name), path)]
+        idx = index_for(name, r)
+        if with_idx and os.path.exists(idx):
+            items.append((shelf_key(d, name, index=True), idx))
+        for key, src in items:
+            try:
+                s3.head_object(Bucket=bucket, Key=key)
+                skipped += 1
+                continue
+            except Exception:
+                pass
+            if dry:
+                print(f"  would push  {key}  ({os.path.getsize(src):,} bytes)")
+            else:
+                s3.upload_file(src, bucket, key)
+                print(f"  pushed  {key}  ({os.path.getsize(src):,} bytes)")
+            sent += 1
+    for f, why in refused:
+        print(f"  REFUSED {f}: {why}")
+    print(f"\n{'(dry run) ' if dry else ''}{sent} object(s) "
+          f"{'to push' if dry else 'pushed'}, {skipped} already on the shelf, "
+          f"{len(refused)} refused")
+    return 4 if refused else 0
+
+
+def cmd_pull(argv):
+    """Fetch what the manifest names and this machine does not have."""
+    r = root()
+    cfg = shelf_config(r)
+    if not cfg:
+        print(SHELF_HELP); return 1
+    s3 = shelf_client(cfg)
+    if not s3:
+        return 1
+    bucket = cfg["bucket"]
+    only_idx = "--indexes-only" in argv
+    book = argv[argv.index("--book") + 1] if "--book" in argv else None
+    want = [a for a in argv if not a.startswith("--")
+            and argv[argv.index(a) - 1] != "--book"]
+    disk = set(files_on_disk(r))
+    got = missed = 0
+    for row in rows(r):
+        f = row.get("file")
+        if not f or "unparsed" in row:
+            continue
+        if book and row.get("book") != book:
+            continue
+        if want and f not in want:
+            continue
+        d = row.get("digest")
+        if not d or len(d) < 64:
+            print(f"  {f}: no full digest in its row, so nothing can address it "
+                  f"— `references.py rehash`")
+            missed += 1
+            continue
+        jobs = []
+        if not only_idx and f not in disk:
+            jobs.append((shelf_key(d, f), os.path.join(refdir(r), f), d))
+        idx = index_for(f, r)
+        if not os.path.exists(idx):
+            jobs.append((shelf_key(d, f, index=True), idx, None))
+        for key, dest, expect in jobs:
+            tmp = dest + ".pulling"
+            try:
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                s3.download_file(bucket, key, tmp)
+            except Exception as e:                                # noqa: BLE001
+                os.path.exists(tmp) and os.remove(tmp)
+                print(f"  {f}: not on the shelf ({type(e).__name__})")
+                missed += 1
+                continue
+            # THE BYTES MUST BE THE BYTES THE ROW NAMES. A shelf that can hand back
+            # something else is worse than an empty one, because the file then looks held.
+            if expect and sha256(tmp) != expect:
+                os.remove(tmp)
+                print(f"  ⚠️  {f}: the shelf returned bytes that are not {expect[:16]}… "
+                      f"— NOT written")
+                missed += 1
+                continue
+            if os.path.exists(dest):
+                # Never overwrite. An annotated or re-OCR'd local copy is the one thing
+                # here that no version history holds.
+                os.remove(tmp)
+                print(f"  {f}: already on disk and differs — left alone")
+                continue
+            os.replace(tmp, dest)
+            print(f"  pulled  {os.path.relpath(dest, r)}")
+            got += 1
+    print(f"\n{got} pulled, {missed} not available")
+    return 4 if missed else 0
+
+
 def cmd_rehash(argv):
     """Fill the FULL sha256 into every manifest row, once.
 
@@ -855,6 +1056,60 @@ def cmd_check(argv):
             bad += 1
     print(f"  indexed: {n_idx}/{n_indexable} indexable "
           f"({len(disk)-n_indexable} page image(s))")
+
+    # ---- the shelf -------------------------------------------------------------
+    # Deny-by-default bought safety by trading a copyright leak for a SINGLE POINT OF
+    # FAILURE: the sources held precisely because they are copyrighted are the ones no
+    # repo has a copy of. That is worth saying on every run, configured or not — the
+    # number is the whole argument for the shelf, and it was invisible until it was
+    # counted. (framework/docs/REFERENCE-SHELF.md.)
+    only_here = sorted(f for f in disk
+                       if is_ignored(f"references/{f}", r)
+                       and not tracked(f"references/{f}", r))
+    cfg = shelf_config(r)
+    if not cfg:
+        if only_here:
+            mb = sum(os.path.getsize(os.path.join(refdir(r), f))
+                     for f in only_here) / (1 << 20)
+            print(f"  shelf: NOT CONFIGURED — {len(only_here)} source(s), {mb:.0f} MB, "
+                  f"exist on this machine and in no repo.")
+            print(f"         Held because they are copyrighted, which is exactly why "
+                  f"nothing else has them. `references.py push`")
+    elif "--shelf" in argv:
+        s3 = shelf_client(cfg)
+        if not s3:
+            # A skip is not a pass, and this one says which it is.
+            print("  shelf: SKIPPED — configured but unreachable (no boto3/credentials)")
+        else:
+            ok_t, _ = _shelf_targets(r)
+            on_shelf = missing = 0
+            for row, path, d in ok_t:
+                try:
+                    s3.head_object(Bucket=cfg["bucket"],
+                                   Key=shelf_key(d, row["file"]))
+                    on_shelf += 1
+                except Exception:                                  # noqa: BLE001
+                    print(f"  ON DISK, NOT ON THE SHELF: {row['file']}")
+                    missing += 1
+                    bad += 1
+            for row in rows(r):
+                f = row.get("file")
+                if not f or "unparsed" in row or f in disk:
+                    continue
+                d = row.get("digest")
+                if not d or len(d) < 64:
+                    continue
+                try:
+                    s3.head_object(Bucket=cfg["bucket"], Key=shelf_key(d, f))
+                    print(f"  NOT HELD, BUT ON THE SHELF: {f} "
+                          f"— `references.py pull {f}`")
+                    bad += 1
+                except Exception:                                  # noqa: BLE001
+                    pass
+            print(f"  shelf: {on_shelf} on the shelf, {missing} not")
+    else:
+        print("  shelf: configured — `check --shelf` compares against it")
+
     print("\nOK" if not bad else f"\n{bad} problem(s)")
     return 0 if not bad else 4
 
@@ -866,7 +1121,8 @@ def main():
         return 1
     cmd, rest = argv[0], argv[1:]
     fn = {"add": cmd_add, "list": cmd_list, "index": cmd_index,
-          "search": cmd_search, "check": cmd_check, "rehash": cmd_rehash}.get(cmd)
+          "search": cmd_search, "check": cmd_check, "rehash": cmd_rehash,
+          "push": cmd_push, "pull": cmd_pull}.get(cmd)
     if not fn:
         print(f"unknown command: {cmd}\n")
         print(__doc__.strip())
