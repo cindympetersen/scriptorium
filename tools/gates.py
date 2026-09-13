@@ -41,6 +41,10 @@ GATES = [
     ("check_pronouns",        ["check_pronouns.py", "{piece}"],        False),
     ("check_stage_direction", ["check_stage_direction.py", "{piece}"], False),
     ("check_refs",            ["check_refs.py"],                       True),
+    # Non-fatal HERE and fatal at publish: a draft may not have settled its outlets, but a
+    # piece about to go live must be able to reach every one it names. The publish skill runs
+    # it as a hard gate at step 0, because the first outlet is the irreversible one.
+    ("check_outlets",         ["check_outlets.py", "{piece}"],         False),
 ]
 
 
@@ -48,7 +52,7 @@ GATES = [
 # line of check_quotes is a warning about what a MATCH does not mean, which says
 # nothing about this run. So prefer a line that carries a count.
 SUMMARY_RE = re.compile(r"(?i)\b\d+\s+(quotation|link|hit|finding|problem|draft|title|"
-                        r"gate|piece|sentence)s?\b|\b0 dead\b|all consistent|verified:")
+                        r"gate|piece|sentence|outlet)s?\b|\b0 dead\b|all consistent|verified:")
 
 
 def summary_of(text):

@@ -176,6 +176,22 @@ first.
    that is scheduled from one that was forgotten, and says the same reassuring sentence either
    way. [`framework/docs/SCHEDULING.md`](../../docs/SCHEDULING.md) has the field and the rule.
 
+0-outlets. **Can you reach every outlet this piece names? Ask BEFORE the first one goes.**
+
+   ```
+   python3 framework/tools/check_outlets.py pieces/<name>        # exit 4 = stop
+   ```
+
+   Publishing is not one act, and **the first outlet is the irreversible one** — on Substack it
+   mails the subscriber list. So the moment to find out that the second outlet cannot be written
+   to is before the first, not after. Measured 2026-09-13 publishing *What Holds You Here*:
+   Substack went live and sent its launch email, and the site upload then failed on an **expired
+   AWS SSO token**, leaving the piece live on one outlet and absent from the other — the
+   half-published state this skill names as the failure to design against, discovered in the one
+   order that cannot be undone. The tool proves a store-backed outlet's credentials actually work
+   (an STS call, then a HEAD on the bucket), reports a browser outlet as MANUAL rather than as a
+   pass, and **refuses a piece that declares no `outlets:` at all.**
+
 0. **Run every gate in one command first:** `python3 framework/tools/gates.py pieces/<name>`
    — links, verified, scripture, quotes, CommonMark, pronouns, stage direction, refs. The
    individual tools are documented below and each is worth reading when it fires; the runner is

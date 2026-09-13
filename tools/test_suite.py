@@ -5183,6 +5183,43 @@ def unit_wrapped_links(tmp):
           f'rc={r.returncode} {r.stdout[-200:]}')
 
 
+def unit_outlet_readiness(tmp):
+    """A piece must be able to reach every outlet it names BEFORE the first one publishes.
+
+    Measured 2026-09-13: Substack published and emailed, then the site upload failed on an
+    expired SSO token. Half-published, and discovered in the only order that cannot be undone.
+    """
+    import os, subprocess, sys, textwrap
+    tool = os.path.join(os.path.dirname(__file__), 'check_outlets.py')
+
+    d = os.path.join(tmp, 'nooutlets'); os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, 'draft.md'), 'w').write('# T\n\n---\n\nbody\n')
+    open(os.path.join(d, 'publish.yaml'), 'w').write('title: T\nsubtitle: S\n')
+    r = subprocess.run([sys.executable, tool, d], capture_output=True, text=True)
+    check('outlets: a piece declaring none is refused',
+          r.returncode == 4 and 'no `outlets:`' in r.stdout, r.stdout[-160:])
+
+    d2 = os.path.join(tmp, 'browseronly'); os.makedirs(d2, exist_ok=True)
+    open(os.path.join(d2, 'draft.md'), 'w').write('# T\n\n---\n\nbody\n')
+    open(os.path.join(d2, 'publish.yaml'), 'w').write('title: T\nsubtitle: S\noutlets:\n  - substack\n')
+    reg = os.path.join(tmp, 'outlets.yaml')
+    open(reg, 'w').write(textwrap.dedent("""
+        outlets:
+          substack:
+            account_handle: someone
+    """).strip() + '\n')
+    r = subprocess.run([sys.executable, tool, d2, '--outlets', reg], capture_output=True, text=True)
+    check('outlets: a browser outlet reports MANUAL and never a pass',
+          r.returncode == 0 and 'man ' in r.stdout and 'account guard' in r.stdout, r.stdout[-160:])
+
+    d3 = os.path.join(tmp, 'unknownoutlet'); os.makedirs(d3, exist_ok=True)
+    open(os.path.join(d3, 'draft.md'), 'w').write('# T\n\n---\n\nbody\n')
+    open(os.path.join(d3, 'publish.yaml'), 'w').write('title: T\nsubtitle: S\noutlets:\n  - nowhere\n')
+    r = subprocess.run([sys.executable, tool, d3, '--outlets', reg], capture_output=True, text=True)
+    check('outlets: an outlet the registry does not know is not a pass',
+          r.returncode == 4, r.stdout[-160:])
+
+
 def main():
     if '--reseal-fixtures' in sys.argv:
         return reseal_fixtures()
@@ -5207,6 +5244,7 @@ def main():
         unit_quotes_false_positives(tmp)
         unit_furniture_and_body_scripture(tmp)
         unit_wrapped_links(tmp)
+        unit_outlet_readiness(tmp)
         unit_notes(tmp)
         unit_outlet_urls(tmp)
         unit_live_urls(tmp)
