@@ -4,7 +4,7 @@
 WHY THIS EXISTS
   The gates were a LIST IN PROSE, in `skills/review/SKILL.md`, and a list in prose is
   a list a reader can skim. Measured 2026-09-11: a review ran six of the eight gates,
-  skipped `check_scripture.py`, and verified the piece's scripture against a website
+  skipped `check_loci.py`, and verified the piece's scripture against a website
   instead — while the desk held an indexed KJV and a tool that reads it. The review
   then reported "sources re-opened" in its artifact, which was true of the network and
   not of the repo. Nothing in the pipeline could tell the difference.
@@ -35,7 +35,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GATES = [
     ("check_links",           ["check_links.py", "{piece}"],           True),
     ("check_verified",        ["check_verified.py", "{piece}"],        True),
-    ("check_scripture",       ["check_scripture.py", "{piece}"],       True),
+    ("check_loci",       ["check_loci.py", "{piece}"],       True),
     ("check_quotes",          ["check_quotes.py", "{piece}"],          True),
     ("check_commonmark",      ["check_commonmark.py", "{piece}"],      True),
     ("check_pronouns",        ["check_pronouns.py", "{piece}"],        False),

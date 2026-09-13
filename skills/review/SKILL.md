@@ -44,7 +44,7 @@ the artifact's gate band **reports what actually ran.** A gate that was skipped 
 there as a pass.
 
 That is a repair, not a convenience. Measured 2026-09-11: a review worked down the list by
-hand, ran six of eight, missed `check_scripture.py`, and verified the piece's scripture
+hand, ran six of eight, missed `check_loci.py`, and verified the piece's scripture
 against a website — while the desk held an indexed KJV and the tool that reads it. The
 artifact then said *sources re-opened*, which was true of the network and not of the repo.
 (Eric: *"you have KJV in the index why didnt you check that?"*)

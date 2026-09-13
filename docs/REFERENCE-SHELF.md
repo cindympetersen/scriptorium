@@ -32,7 +32,7 @@ and every publish, the desk already has one flat shelf** — wearing a per-book 
 And the division was never exercised: three books existed and **one** had a
 `references/` folder. `alignment-fellowship` and `all-my-stories` had none.
 
-The framework itself already suspected this. `check_scripture.py` resolves its KJV index
+The framework itself already suspected this. `check_loci.py` resolves its KJV index
 in this order:
 
 ```python
@@ -79,7 +79,7 @@ site meant anyway.
 52 files and 49 indexes moved; 52 rows gained a Book column;
 rewrite one `.gitignore` and the root's defense-in-depth lines; collapse `refdir(book)` →
 `refdir()` and `books()` out of `references.py`, `refindex.py`, `check_quotes.py` and
-`check_scripture.py` (whose fallbacks then become dead and should go with it).
+`check_loci.py` (whose fallbacks then become dead and should go with it).
 
 One commit. The new `references/.gitignore` was written and **probed with
 `git check-ignore` BEFORE a single byte moved** — the same order `references.py add` uses,

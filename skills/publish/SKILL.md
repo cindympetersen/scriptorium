@@ -480,7 +480,7 @@ from `GET /api/v1/drafts/<id>`, which does carry it, and from the dialog — nev
    followed. Fix a dead link here **and** in every scaffold file that repeats it.
 
 0b-scripture. **Check every scripture quotation against the text, not against a memory of it:**
-   `python3 framework/tools/check_scripture.py pieces/<name>`
+   `python3 framework/tools/check_loci.py pieces/<name>`
    It reads each footnote's locus, looks the verse up in the indexed KJV, and compares the
    quoted spans. **This is the one preflight step that can say a citation is WRONG** rather
    than that nobody has confirmed it — `check_verified.py` records whether anyone *said* they

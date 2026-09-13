@@ -2,7 +2,7 @@
 """check_quotes.py — check a draft's NON-SCRIPTURE quotations against the sources held on disk.
 
 WHY THIS EXISTS
-  `check_scripture.py` closed this hole for one source: every scripture quotation is
+  `check_loci.py` closed this hole for one source: every scripture quotation is
   matched against a local KJV index, and the house conventions are understood rather
   than reported as errors. Everything else in a piece — a book, an opinion, a lexicon,
   a transcript — was still checked by a human or a model opening the file, or not at all.
@@ -43,7 +43,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import references as R
-from check_scripture import LOCUS_RE
+from check_loci import LOCUS_RE
 
 # Words that are also surnames and would match a source by accident. "King" is
 # Godfré Ray King's surname and also in half the King James footnotes on this desk;
@@ -78,6 +78,22 @@ CITATION_SIGNAL = re.compile(
     r"|\bch(?:ap)?\.\s*\w"                 # ch. II
     r"|\b\d+\s+U\.S\.\s+\d+"               # a law report
     r"|§\s*\d")
+
+# A CANON LOCUS IS A CITATION SIGNAL, and leaving it out cost silence rather than noise.
+# A footnote reading "Qur'an 112 (al-Ikhlas), Pickthall:" carries no year, no `p.`, no
+# `ch.` and no section mark, so when nothing matched it by source the note was ruled not
+# to be a citation at all — neither checked nor counted as unchecked. Built from the
+# instance's own canon records, and DELIBERATELY only from the canons check_loci cannot
+# resolve: a King James locus is check_loci's to own, and adding it here would take it
+# back. (canons.py; framework/docs/CITATION-CHECKS.md.)
+import canons as _C
+_UNRESOLVABLE_CANONS = [c for c in _C.load() if not c.has_index and c.locus_re]
+CANON_CITE = _C.prefix_pattern(_UNRESOLVABLE_CANONS)
+
+
+def _is_citation(note):
+    return bool(CITATION_SIGNAL.search(note)
+                or (CANON_CITE and CANON_CITE.search(note)))
 
 
 def norm(t):
@@ -161,7 +177,7 @@ def spans(text):
     """Quoted spans, in this house's two shapes: an italic run and a double-quoted run.
 
     A `[*Title*](url)` is a link and never a quotation — stripped first, as
-    check_scripture strips it, for the same reason.
+    check_loci strips it, for the same reason.
     """
     text = re.sub(r"\[\*[^*]+\*\]\([^)]*\)", " ", text)
     text = re.sub(r"\*\*[^*]+\*\*", " ", text)          # bold is prose; see spans_with_pos
@@ -288,11 +304,11 @@ def is_scripture(span):
     A footnote can name a held source and quote scripture in the same breath — the
     creeds volume cited beside Philippians 2 is the case that caught this. Without
     this test the verse is reported NOT FOUND in Schaff, which is true and useless:
-    the verse was never claimed to be there, and `check_scripture.py` owns it.
+    the verse was never claimed to be there, and `check_loci.py` owns it.
     """
     if _KJV[0] is None:
         try:
-            from check_scripture import find_index
+            from check_loci import find_index
             path = find_index()
             _KJV[0] = R.load_index(path)[1] if path else ""
         except Exception:
@@ -351,7 +367,7 @@ def denumbered(stream):
 def best_run(span, stream):
     """Longest contiguous run of the span's words that appears in the source, and where.
 
-    This is the same guard check_scripture.py uses, and for the same reason: an italic
+    This is the same guard check_loci.py uses, and for the same reason: an italic
     run in this house is a quotation, a sibling essay's title, a Greek word, or plain
     emphasis. A checker that reports every one of them as a missing quotation trains
     the reader to skim past it, which is the failure it exists to prevent.
@@ -565,13 +581,13 @@ def main():
             continue
 
         if not matched:
-            # A scripture-only note is check_scripture's, not this tool's.
+            # A scripture-only note is check_loci's, not this tool's.
             if LOCUS_RE.search(note) and not CITATION_SIGNAL.search(
                     LOCUS_RE.sub(" ", note)):
                 if verbose:
-                    print(f"[^{key}] scripture — check_scripture.py owns this one")
+                    print(f"[^{key}] scripture — check_loci.py owns this one")
                 continue
-            if CITATION_SIGNAL.search(note):
+            if _is_citation(note):
                 print(f"[^{key}] NOT HELD — cites a source the desk does not hold "
                       f"and indexed, so {len(cand)} quotation(s) here were checked by nothing")
                 print(f"   note: {note[:150]}")
@@ -604,7 +620,7 @@ def main():
             if status != "MATCH" and is_scripture(q):
                 if verbose:
                     print(f"[^{key}] scripture quoted beside {s['file']} — "
-                          f"check_scripture.py owns it")
+                          f"check_loci.py owns it")
                 continue
             if status == "NO OVERLAP":
                 no_overlap.append((key, s["file"], q))

@@ -353,7 +353,7 @@ def main():
     print('\nThis tool checks whether anyone SAID they checked. It cannot tell you the sources are '
           'good.\nDo not clear a piece to make this message go away.\n'
           'For SCRIPTURE it can be done properly, and should be before you clear anything:\n'
-          '  python3 framework/tools/check_scripture.py <piece_dir>\n'
+          '  python3 framework/tools/check_loci.py <piece_dir>\n'
           'compares every quotation against an indexed KJV and names the word where one\n'
           'leaves the text.')
     return 1

@@ -363,6 +363,58 @@ def unit_references(tmp):
           R.text_layer_verdict(src, out) is None)
 
 
+def unit_canons(tmp):
+    """The canon records, and the one duplication they are allowed to have.
+
+    `references/canons/kjv.yaml` carries the 66 section names for the READER; refindex.py
+    keeps its own copy for the BUILDER, which refuses to index a source that does not have
+    66 book headings. Two records of the same claim, written for different purposes and at
+    different times — which is fine exactly as long as something checks that they agree.
+    """
+    import canons as C
+    from refindex import KJV_BOOKS, HEADER_ALIASES
+    cs = C.load()
+    if not cs:
+        # A skip is not a pass, and this one has to say which it is: a desk with no canon
+        # records falls back to the framework's built-in list, and check_loci says so.
+        check('canons: no records in this instance — reader falls back to the built-in '
+              'King James list (check_loci says so at runtime)', True)
+        return
+    by = {c.slug: c for c in cs}
+    check('canons: every record parses and has a slug', all(c.slug != '?' for c in cs))
+    check('canons: a record with an index is resolvable, one without is not',
+          all(c.has_index == bool(c.index and os.path.exists(c.index)) for c in cs))
+    if 'kjv' in by:
+        k = by['kjv']
+        check('canons: the kjv record carries all 66 sections', len(k.sections) == 66,
+              f'{len(k.sections)}')
+        check('canons: the reader\'s section list matches the BUILDER\'s, exactly',
+              list(k.sections) == list(KJV_BOOKS),
+              f'{sorted(set(k.sections) ^ set(KJV_BOOKS))[:4]}')
+        check('canons: the aliases cover the builder\'s header aliases',
+              set(HEADER_ALIASES) <= set(k.aliases))
+        check('canons: a named canon resolves a real locus',
+              bool(k.locus_re and k.locus_re.search('as in John 3:16 and')))
+        check('canons: and does NOT invent a section from a stray capital',
+              not (k.locus_re and k.locus_re.search('And 22:17')),
+              'the false-light failure, 2026-09-10')
+    numbered = [c for c in cs if not c.named]
+    if numbered:
+        n = numbered[0]
+        check('canons: a numbered canon needs its own name to make a locus',
+              bool(n.locus_re) and not n.locus_re.search(' 29:46 '),
+              n.slug)
+    # The whole point of a record with no index: the gap is DECLARED, not absent.
+    import check_loci as L
+    if any(not c.has_index for c in cs):
+        found = L.unresolvable_loci("see Qur'an 29:46 and Gita 4.7 for this")
+        check('canons: a locus in an unresolved canon is reported, not silent',
+              len(found) >= 1, f'{[f[1] for f in found]}')
+    import check_quotes as Q
+    check('canons: an unresolved canon locus counts as a CITATION SIGNAL in check_quotes',
+          Q._is_citation("Qur'an 112 (al-Ikhlas), Pickthall:") if Q.CANON_CITE else True)
+
+
 def unit_reference_add(tmp):
     """`add` end to end — the one command here with a one-way consequence.
 
@@ -1363,7 +1415,7 @@ def unit_scripture(tmp):
     """
     import importlib.util, os, gzip
     spec = importlib.util.spec_from_file_location(
-        'check_scripture', os.path.join(os.path.dirname(__file__), 'check_scripture.py'))
+        'check_loci', os.path.join(os.path.dirname(__file__), 'check_loci.py'))
     cs = importlib.util.module_from_spec(spec); spec.loader.exec_module(cs)
 
     idx = os.path.join(tmp, 'idx.tsv.gz')
@@ -5085,7 +5137,7 @@ def unit_furniture_and_body_scripture(tmp):
        KJV index carried it and every check passed them.
     2. `refindex --verify` had no opinion about furniture, so a contaminated index
        could be built, verified, shipped and trusted.
-    3. `check_scripture` read the footnotes only, so a piece that quotes scripture in
+    3. `check_loci` read the footnotes only, so a piece that quotes scripture in
        its prose could report "0 problems" having checked none of what a reader sees.
     """
     import importlib.util, os, gzip
@@ -5124,8 +5176,8 @@ def unit_furniture_and_body_scripture(tmp):
         f.write('Genesis\t1\t1\tIn the beginning www.holybooks.com God created\n')
     check('verify: a contaminated index cannot pass', RI.verify(bad) != 0, 'verify returned 0')
 
-    # 3. check_scripture reads the BODY, not only the notes
-    CS = load('check_scripture')
+    # 3. check_loci reads the BODY, not only the notes
+    CS = load('check_loci')
     idx = os.path.join(tmp, 'mini.tsv')
     with open(idx, 'w', encoding='utf-8') as f:
         f.write('Genesis\t50\t15\tAnd when Joseph\u2019s brethren saw that their father was '
@@ -5138,10 +5190,10 @@ def unit_furniture_and_body_scripture(tmp):
                 '[^g]: Genesis 50:15, KJV.\n')
     import subprocess, sys
     r = subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__),
-                        'check_scripture.py'), piece, '--index', idx],
+                        'check_loci.py'), piece, '--index', idx],
                        capture_output=True, text=True)
-    check('check_scripture: a body quotation is checked', 'MATCH' in r.stdout, r.stdout[-300:])
-    check('check_scripture: the body count reaches the summary',
+    check('check_loci: a body quotation is checked', 'MATCH' in r.stdout, r.stdout[-300:])
+    check('check_loci: the body count reaches the summary',
           '1 quotation(s) checked' in r.stdout or '2 quotation(s) checked' in r.stdout,
           r.stdout[-200:])
 
@@ -5245,6 +5297,7 @@ def main():
         unit_outlet_content(tmp)
         unit_commonmark(tmp)
         unit_references(tmp)
+        unit_canons(tmp)
         unit_reference_add(tmp)
         unit_quotes(tmp)
         unit_quotes_false_positives(tmp)

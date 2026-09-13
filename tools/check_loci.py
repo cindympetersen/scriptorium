@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Check a draft's scripture quotations — BODY AND FOOTNOTES — against an indexed KJV.
+"""Check a draft's CANON quotations — body and footnotes — against a verse-keyed index.
+
+NAMED FOR THE MECHANISM, NOT THE SUBJECT (renamed from check_scripture.py, 2026-09-13).
+  What this tool does is resolve a citation of the form *section chapter:verse* and check
+  the words AT that address. That is edition-INDEPENDENT — a verse is a verse in any
+  printing — which is exactly what `check_quotes.py` cannot assume, and why it carries
+  machinery to learn the offset between a printed leaf and a PDF page. Two checkers, split
+  on how a quotation is ADDRESSED.
+
+  The old name said "scripture" and the code said King James, and between them they kept
+  four traditions the corpus already cites out of a check built for exactly them: the desk
+  quotes the Qur'an by surah:ayah and the Gita by chapter.verse, holds Pickthall, Arnold,
+  Müller and Griffith, and could resolve none of it. The canon now comes from
+  `references/canons/*.yaml`; see canons.py and framework/docs/CITATION-CHECKS.md.
 
 WHY THIS EXISTS
   `check_verified.py` records whether anyone SAID they checked, and says plainly
@@ -32,12 +45,13 @@ WHAT MAKES THIS HARDER THAN A STRING COMPARE
   substitution is not the same as one that matches outright, and you get told which.
 
 USAGE
-  python3 check_scripture.py <piece_dir> [--index <kjv.tsv.gz>] [-v]
+  python3 check_loci.py <piece_dir> [--index <kjv.tsv.gz>] [--canon <slug>] [-v]
 
 EXIT
   0  every locus resolved and every quotation matched
   1  usage / no draft / no index
-  4  a quotation does not match its locus, or a locus is not in the index
+  4  a quotation does not match its locus, a locus is not in the index, or a locus
+     names a canon the desk declares and cannot resolve (NO CANON INDEX)
 """
 import sys, os, re, gzip, unicodedata
 
@@ -68,15 +82,53 @@ def find_index():
     hits = sorted(glob.glob("books/*/references/kjv.tsv.gz"))   # pre-2026-09-13 desks
     return hits[0] if hits else None
 
-# The book must come from the closed set. A loose pattern matched "And 22:17" as a
+# The section must come from the closed set. A loose pattern matched "And 22:17" as a
 # book called "And" (measured on false-light, 2026-09-10) — the same class of error
 # as the index's "Page 621 John" matching "1 John". Names are known; use them.
-from refindex import KJV_BOOKS, HEADER_ALIASES
-ALIASES = dict(HEADER_ALIASES)
-ALIASES.update({"Psalm": "Psalms"})
-_NAMES = sorted(set(KJV_BOOKS) | set(ALIASES), key=len, reverse=True)
-LOCUS_RE = re.compile(r"\b(" + "|".join(re.escape(b) for b in _NAMES) +
-                      r")\s+(\d+):(\d+)(?:\s*[-–—]\s*(\d+))?")
+#
+# THEY NOW COME FROM THE INSTANCE. `references/canons/kjv.yaml` carries the 66 names and
+# the aliases; refindex.py keeps its own copy for the BUILDER, which validates that a
+# source edition really has 66 headings before indexing it. Two records of the same claim
+# written for different purposes, and the suite checks that they agree.
+import canons as C
+
+_CANONS = C.load()
+_RESOLVABLE = [c for c in _CANONS if c.has_index]
+_UNRESOLVABLE = [c for c in _CANONS if not c.has_index and c.locus_re]
+
+if _RESOLVABLE:
+    _PRIMARY = _RESOLVABLE[0] if len(_RESOLVABLE) == 1 else \
+        next((c for c in _RESOLVABLE if c.slug == "kjv"), _RESOLVABLE[0])
+    ALIASES = dict(_PRIMARY.aliases)
+    LOCUS_RE = _PRIMARY.locus_re
+else:
+    # No canon record, or no index: fall back to the framework's own KJV list so a desk
+    # that has not written its records yet still checks scripture. It is a fallback, and
+    # main() says out loud when it is the one in use — a silent fallback is how a check
+    # that is not running looks exactly like one that is.
+    _PRIMARY = None
+    from refindex import KJV_BOOKS, HEADER_ALIASES
+    ALIASES = dict(HEADER_ALIASES)
+    ALIASES.update({"Psalm": "Psalms"})
+    _NAMES = sorted(set(KJV_BOOKS) | set(ALIASES), key=len, reverse=True)
+    LOCUS_RE = re.compile(r"\b(" + "|".join(re.escape(b) for b in _NAMES) +
+                          r")\s+(\d+):(\d+)(?:\s*[-–—]\s*(\d+))?")
+
+
+def unresolvable_loci(text):
+    """Loci naming a canon the desk DECLARES and cannot resolve.
+
+    `index: null` in a canon record is a statement, not a gap in the data: the desk holds
+    the text, `check_quotes` can match its wording, and nothing can say whether the words
+    sit at the address the note gives. Before this, such a citation produced no output at
+    all — neither a check nor a complaint — so a piece with ten unverified Qur'an loci
+    printed exactly like a piece with none.
+    """
+    out = []
+    for c in _UNRESOLVABLE:
+        for m in c.locus_re.finditer(text):
+            out.append((c, m.group(0)))
+    return out
 
 
 def load(path):
@@ -355,7 +407,8 @@ def main():
     if not os.path.exists(draft_path):
         print(f"no draft.md in {piece}"); sys.exit(1)
     index_path = (sys.argv[sys.argv.index("--index") + 1]
-                  if "--index" in sys.argv else find_index())
+                  if "--index" in sys.argv else
+                  (_PRIMARY.index if _PRIMARY else None) or find_index())
     if not index_path or not os.path.exists(index_path):
         print("no KJV index found. The framework ships the builder; the index is\n"
               "content and lives in the instance, with its provenance recorded:\n"
@@ -366,6 +419,13 @@ def main():
         sys.exit(1)
     idx = load(index_path)
     verbose = "-v" in sys.argv
+    if _PRIMARY is None:
+        # Said out loud, every time. A silent fallback is how a check that is running on
+        # the framework's built-in list looks exactly like one running on the instance's
+        # own canon record.
+        print("note: no canon record in use — falling back to the framework's built-in "
+              "King James list.\n      Write references/canons/kjv.yaml to make the "
+              "canon the instance's own (framework/docs/CITATION-CHECKS.md).\n")
 
     checked = bad = 0
     draft = open(draft_path).read()
@@ -385,6 +445,27 @@ def main():
     for name, note in footnotes(draft):
         c, b = check_unit(f"[^{name}]", note, note, idx, verbose)
         checked += c; bad += b
+
+    # NO CANON INDEX — a locus the desk KNOWS the canon of and cannot resolve. Reported
+    # after the resolvable work, because it is a statement about the shelf rather than
+    # about this draft: the fix is to build the index, not to edit the prose.
+    unresolved = unresolvable_loci(draft)
+    if unresolved:
+        by_canon = {}
+        for c, loc in unresolved:
+            by_canon.setdefault(c, []).append(loc)
+        print()
+        for c, locs in sorted(by_canon.items(), key=lambda kv: kv[0].slug):
+            uniq = sorted(set(locs))
+            print(f"NO CANON INDEX — {len(locs)} locus/loci in {c.name}, which the desk "
+                  f"declares and cannot resolve:")
+            print(f"   {', '.join(uniq[:8])}{' …' if len(uniq) > 8 else ''}")
+            held = (f"references/{c.source}" if c.source else None)
+            print(f"   The wording of a quotation here is checked by check_quotes against "
+                  f"{held or 'nothing held'};")
+            print(f"   its ADDRESS is checked by nothing. Build a verse-keyed index and "
+                  f"name it in references/canons/{c.slug}*.yaml.")
+        bad += len(unresolved)
 
     print(f"\n{checked} quotation(s) checked, {bad} problem(s)")
     sys.exit(4 if bad else 0)

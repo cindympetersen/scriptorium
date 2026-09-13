@@ -6,7 +6,7 @@ against resources that we have locally and not from the LLM itself … have a wa
 bringing used references into the writing-desk (.gitignoring them if they are
 copywritten) and they can be used in the future and are indexed for future reference"*).
 
-  The desk already closed this hole for ONE source. `check_scripture.py` verifies every
+  The desk already closed this hole for ONE source. `check_loci.py` verifies every
   scripture quotation against a local KJV index and knows the house conventions. Nothing
   did it for anything else — and the measurement is blunt: on 2026-09-11 this desk held
   **43 reference files and exactly one index**. `refindex.py --scheme pages` had existed
@@ -61,7 +61,7 @@ from datetime import date
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 INDEX_DIR = ".index"
-LEGACY_INDEXES = {"kjv.tsv.gz"}          # owned by check_scripture.py, documented in its own
+LEGACY_INDEXES = {"kjv.tsv.gz"}          # owned by check_loci.py, documented in its own
                                          # README section rather than as a manifest row
 SOURCE_EXT = (".pdf", ".txt", ".md", ".html", ".htm", ".epub")
 
@@ -391,7 +391,7 @@ def locate(offsets, at):
 
 
 def norm(t):
-    """The comparison form. Kept deliberately close to check_scripture.norm so the two
+    """The comparison form. Kept deliberately close to check_loci.norm so the two
     checkers do not disagree about what 'the same words' means — but WITHOUT its
     bracket-stripping, which is a King James convention and not a general one."""
     # Drop combining marks rather than letting the punctuation strip turn them into
