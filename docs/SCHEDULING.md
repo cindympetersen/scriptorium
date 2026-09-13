@@ -234,3 +234,65 @@ boundary where a fixed `-04:00` quietly does not.
 The field does not expire and does not need to. Once the moment has passed, `state()`
 reads *open*, every tool proceeds, and the line can stay in the manifest as the record of
 when the piece was due. Clear it only if the piece is genuinely unscheduled again.
+
+## Per-outlet publication dates
+
+**One piece, one date could not describe the desk it ran on.** A canonical quire site carries
+`on_schedule: immediate` and is meant to lead; the feed outlets wait for the moment. Those are
+genuinely different days, and a single `published_at:` had to mean both — so in practice it meant
+*live on the feed outlet*.
+
+```yaml
+published_at: 2026-09-12          # the piece's date; what a one-outlet piece uses
+published:
+  alignmentfellowship: 2026-09-12 # the canonical led
+  substack: 2026-09-12            # the feed outlet's own post_date
+```
+
+`schedule.published_on(piece, outlet)` answers it: the outlet's own entry wins, and
+`published_at:` is the fallback, so **every manifest written before this keeps working** and a
+one-outlet piece never needs the block. `md_to_site.py` gates and dates the export per outlet.
+
+**The contradiction this resolved, because it is the interesting part.** `md_to_site.py` held back
+any piece with no `published_at`, for a good reason recorded in its own comment: *an outlet
+declaration is INTENT; publication is FACT*, after a composed-but-unpublished piece once entered a
+bundle bound for a live site. But `published_at` is written **after the feed outlet goes live** —
+so **the canonical could only ever publish after the outlet it is supposed to precede.** The
+registry said *canonical first* and the tooling made it unreachable. Measured 2026-09-12, by
+following the registry exactly and getting a live Substack post whose canonical URL 404'd.
+
+So the gate now reads: a piece with **neither** `published_at` **nor** `publish_at` is a draft and
+is held back everywhere — the original guard, untouched. A **sealed, scheduled** piece is not a
+draft, and on an `immediate` outlet it leads, dated with the moment it is due.
+
+## The canonical leads, and `record` enforces it
+
+`schedule.py record` **refuses** to write a feed outlet's native schedule while the piece declares
+an outlet configured `on_schedule: immediate` that is not live yet:
+
+    refusing to record: the canonical has not been published.
+
+A native schedule fires unattended, so arming one over an unpublished canonical *schedules* the
+half-published state `outlet_audit` exists to find. **It is conditional by design** (Eric,
+2026-09-11: *"refuse, but only if there is a canonical outlet and it is configured to publish
+immediately"*) — a piece with no immediate outlet has no canonical to lead, and nothing invents one.
+
+## The runbook is generated from the piece
+
+`schedule.py runbook <piece>` was **one hard-coded template** written for a single MuffinLabs
+piece, with `{slug}`/`{title}`/`{moment}` substituted into it and handed unchanged to every other
+piece on the desk. For an *elmuffin* piece it named a LinkedIn article the piece does not have and
+told the session to edit `muffinlabs-web/next.config.ts` — another publication's repo — and it
+never mentioned the canonical site, `piece_header.py`, `substack_verify` or the Note.
+
+It is now built from the manifest: the piece's own outlets, split by policy into the canonical that
+leads and the feeds that wait; its `companions:` Note if it has one; and **the whole
+reconciliation**, which was the standing gap. The platforms publish themselves; the per-outlet
+date, the header, the four verifications, the **link preview** and the Note's record are all the
+desk's, and every one of them used to depend on somebody remembering. (Eric, 2026-09-12: *"the
+Still to do after it fires should be baked into the tooling so it runs at the same time as the
+note."*)
+
+**The link preview is in there because it is the step a store publish structurally cannot do:**
+`og:image` is a file in the site repo and an upload never touches that repo. It was forgotten again
+on 2026-09-12 and `outlet_audit` caught it — a live page whose shared link showed no image.

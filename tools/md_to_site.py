@@ -339,9 +339,24 @@ def export_piece(piece_dir, bundle, opts):
         # What the desk calls it. Keeps a bundle traceable back to the piece it came
         # from, and lets the site emit a redirect from any URL it published before.
         fm['source_slug'] = source_slug
-    for k in ('subtitle', 'published_at', 'footnotes'):
+    for k in ('subtitle', 'footnotes'):
         if man.get(k):
             fm[k] = man[k]
+    # THIS OUTLET's publication date, not the piece's only one. A canonical site leads and a
+    # feed outlet waits for the moment, so the same piece is genuinely published on different
+    # days in different places; `published:` in the manifest carries the per-outlet dates and
+    # `published_at:` is the fallback every older manifest already has (schedule.published_on).
+    # A sealed piece leading on its canonical has no date yet anywhere -- its date is the
+    # moment it is due, which is the day it will be published here.
+    on = schedule.published_on(man, opts.outlet)
+    if not on:
+        try:
+            moment = schedule.state(piece_dir)[1]
+            on = moment.date().isoformat() if moment else None
+        except Exception:
+            on = None
+    if on:
+        fm['published_at'] = on
     if man.get('tags'):
         fm['tags'] = bundle_tags(slug, man, opts.vocabs, publication)
     if opts.canonical_base:
@@ -451,7 +466,7 @@ def main():
             return bool(outlets)
         return m.get('site') is True      # legacy: pre-outlets manifests
 
-    selected, skipped, unpublished = [], [], []
+    selected, skipped, unpublished, leads = [], [], [], []
     for p in o.pieces:
         if not (opted_in(p) or o.force):
             skipped.append(p); continue
@@ -460,8 +475,27 @@ def main():
         # that ships an unfinished draft, and on a piece whose first outlet is still
         # pending it publishes out of order. Caught 2026-09-09, when a composed-but-
         # unpublished piece entered a bundle bound for a live site.
-        if not load_manifest(p).get('published_at') and not o.include_unpublished:
-            unpublished.append(p); continue
+        policy = schedule.policy_for(o.outlets, o.outlet)
+        if not schedule.published_on(load_manifest(p), o.outlet) and not o.include_unpublished:
+            # ...but a SEALED, SCHEDULED piece is not a draft, and for a CANONICAL outlet it
+            # is the whole point of `on_schedule: immediate`. Until 2026-09-11 this gate and
+            # that policy contradicted each other and the policy always lost: `published_at`
+            # is written AFTER the feed outlet goes live, so the canonical could only ever
+            # publish after the outlet it is supposed to precede. The result was the failure
+            # `outlet_audit` is named for -- a Substack post live with its canonical URL
+            # 404ing -- reachable by following the registry exactly.
+            # So: a piece carrying a reviewed `publish_at:` leads on an immediate outlet. A
+            # piece with NEITHER `published_at` NOR `publish_at` is still a draft and is held
+            # back everywhere, which is the 2026-09-09 case above, untouched.
+            leading = False
+            if policy == schedule.IMMEDIATE:
+                try:
+                    leading = schedule.state(p)[1] is not None
+                except Exception:
+                    leading = False          # fails closed, like every other read here
+            if not leading:
+                unpublished.append(p); continue
+            leads.append(p)
         # A piece can be finished, dated, and still not due. `publish_at:` is a moment
         # the piece may not be public before, and the store bundle IS public: a site
         # reads it. So this refuses rather than skipping -- a piece deliberately named
@@ -472,7 +506,6 @@ def main():
         # belongs there as soon as it is finished, while the feed outlets wait
         # (`on_schedule:` in outlets.yaml; schedule.py's OUTLETS section). The policy
         # fails closed, so an unreadable registry still refuses.
-        policy = schedule.policy_for(o.outlets, o.outlet)
         refusal = schedule.refuse_if_embargoed(p, policy=policy)
         if refusal:
             die(12, f'{refusal}\n'
@@ -485,6 +518,13 @@ def main():
         if note and policy == schedule.IMMEDIATE:
             print(f'  {note}', file=sys.stderr)
         selected.append(p)
+    if leads:
+        names = ', '.join(os.path.basename(x.rstrip('/')) for x in leads)
+        print(f"  canonical leads, not yet published elsewhere ({len(leads)}): {names}",
+              file=sys.stderr)
+        print(f"  -> `on_schedule: immediate` for {o.outlet!r}: a sealed piece belongs on the "
+              f"canonical\n     site at once, so its URL resolves when the feed outlets fire.",
+              file=sys.stderr)
     if unpublished:
         names = ', '.join(os.path.basename(x.rstrip('/')) for x in unpublished)
         print(f"  held back, not published yet ({len(unpublished)}): {names}", file=sys.stderr)

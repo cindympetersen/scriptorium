@@ -291,6 +291,97 @@ def parse_window(s):
     return timedelta(hours=n) if m.group(2).lower() == 'h' else timedelta(days=n)
 
 
+
+def _manifest(piece_dir):
+    """The manifest as a dict, or {}. Guarded import: PyYAML is optional here, exactly as
+    it is for the outlet registry, and one optional dependency must not become a hard one."""
+    path = os.path.join(piece_dir, 'publish.yaml')
+    if not os.path.exists(path):
+        return {}
+    try:
+        import yaml
+    except ImportError:                                        # pragma: no cover
+        return {}
+    try:
+        with open(path, encoding='utf-8') as f:
+            return yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+
+
+def published_on(piece_dir, outlet=None):
+    """The date this piece went live ON THIS OUTLET, or None.
+
+    ONE PIECE, ONE DATE was the old shape, and it could not describe the desk it ran on
+    (Eric, 2026-09-11: "there should be a published_at for each outlet"). A canonical quire
+    site carries `on_schedule: immediate` and is meant to lead; the feed outlets wait for the
+    moment. Those are different days, and a single scalar had to mean both -- so it meant
+    "live on the feed outlet", which is why the canonical could never publish first: the one
+    gate it had to pass was written only after the outlet it precedes had already fired.
+
+        published_at: 2026-09-12          # the piece's date; what a lone outlet uses
+        published:
+          alignmentfellowship: 2026-09-11 # the canonical led
+          substack: 2026-09-12
+
+    An outlet's own entry wins; the scalar is the fallback, so every manifest written before
+    this keeps working unchanged and a one-outlet piece never needs the block."""
+    man = piece_dir if isinstance(piece_dir, dict) else _manifest(piece_dir)
+    per = man.get('published')
+    if outlet and isinstance(per, dict) and per.get(outlet):
+        return per[outlet]
+    return man.get('published_at') or None
+
+
+def canonical_debt(piece_dir, outlets_path=None, outlets=None):
+    """Immediate-policy outlets this piece declares that are NOT live yet -> [names].
+
+    The refusal behind it: a feed outlet may not be armed while the canonical is unhandled,
+    because the feed fires unattended and the canonical URL it points at would 404 until
+    somebody remembered. It is conditional on there BEING such an outlet (Eric, 2026-09-11:
+    "refuse, but only if there *is* a canonical outlet and it is configured to publish
+    immediately") -- a desk with no immediate outlet has no canonical to lead, and nothing
+    here should invent one."""
+    man = _manifest(piece_dir)
+    declared = man.get('outlets') or []
+    if not isinstance(declared, list):
+        return []
+    debt = []
+    for o in declared:
+        if not isinstance(o, str):
+            continue
+        pol = policy_for(outlets, o) if isinstance(outlets, dict) else outlet_policy(outlets_path, o)
+        if pol == IMMEDIATE and not published_on(man, o):
+            debt.append(o)
+    return debt
+
+
+
+def _registry_path():
+    """The instance's outlet registry, or None. The framework holds no URLs and no policy;
+    the registry is the instance's, found from the piece tree rather than assumed."""
+    try:
+        root = os.path.dirname(pieces_root())
+    except Exception:
+        return None
+    cand = os.path.join(root, 'publishing', 'outlets.yaml')
+    return cand if os.path.exists(cand) else None
+
+
+def _registry_outlets():
+    """The registry's `outlets:` mapping, or {} — so policy_for() can answer without a
+    second file read. Fails closed to {}, which reads as at_moment for everything."""
+    path = _registry_path()
+    if not path:
+        return {}
+    try:
+        import yaml
+        with open(path, encoding='utf-8') as f:
+            return (yaml.safe_load(f) or {}).get('outlets') or {}
+    except Exception:
+        return {}
+
+
 def cmd_check(args):
     bad = 0
     for ref in args.pieces:
@@ -350,39 +441,103 @@ def cmd_due(args):
     return 0
 
 
-RUNBOOK = """\
-Publication day for {slug} — "{title}".
+def _runbook_text(pdir, moment, root):
+    """Build the wake-up prompt FROM THE PIECE, not from a template.
 
-You are a fresh session with no memory of how this was arranged. Everything you need is here
-and in the piece; read pieces/{slug}/README.md first, and do not improvise past this list.
+    It used to be one hard-coded string with {slug}/{title}/{moment} substituted -- written
+    for one MuffinLabs piece, and handed unchanged to every other. For an elmuffin piece it
+    named a LinkedIn article the piece does not have and told the session to edit
+    `muffinlabs-web/next.config.ts`, a repo of another publication entirely; it never once
+    mentioned the canonical site, `piece_header.py`, `substack_verify` or the Note. A prompt
+    that a fresh session is supposed to follow without improvising must be about the piece it
+    is woken for. (Found 2026-09-12, reading the runbook this desk would have fired.)
 
-The desk is {root}. The moment is {moment}; `python3 framework/tools/schedule.py check {slug}`
-must say OPEN before anything public happens. If it says EMBARGOED, stop: you woke early.
+    And it carries the RECONCILIATION, which was the standing gap: the platforms publish
+    themselves, and everything the desk owes afterwards -- the per-outlet date, the header,
+    the four verifications, the link preview, the Note's record -- was left to whoever
+    remembered. (Eric, 2026-09-12: "the Still to do after it fires should be baked into the
+    tooling so it runs at the same time as the note.")"""
+    man = _manifest(pdir)
+    slug = os.path.basename(pdir)
+    title = man.get('title') or slug
+    outlets = [o for o in (man.get('outlets') or []) if isinstance(o, str)]
+    reg = _registry_outlets()
+    lead = [o for o in outlets if policy_for(reg, o) == IMMEDIATE]
+    feed = [o for o in outlets if policy_for(reg, o) != IMMEDIATE]
+    debt = canonical_debt(pdir, _registry_path())
+    note = ((man.get('companions') or {}).get('note')
+            if isinstance(man.get('companions'), dict) else None)
+    sub = next((o for o in feed if 'substack' in o), None)
 
-IF YOU ARE RUNNING LATE — the app was closed and this fired at launch instead of on time — say
-so in your first line, then check what already went out before you touch anything: the Substack
-post and the LinkedIn article are on their own platforms' schedulers and may already be live.
-
-1. `python3 framework/tools/lease.py acquire {slug} --what "publication day"`.
-2. Gates: `schedule.py check`, `check_verified.py`, `check_links.py`, `check_refs.py` — any
-   refusal stops the run and is reported, not worked around.
-3. The canonical goes first. Cutover steps 1-3 in the README: copy original_published_at to
-   published_at, record blog_url and canonical, export the bundle, publish it to the store, then
-   remove {slug} from TAKEN_DOWN_FOR_REDRAFT in muffinlabs-web/next.config.ts and deploy — a
-   config redirect beats the page route, so the piece cannot appear at its URL until that lands.
-4. Verify the live page yourself before saying it is up, on a cache-busted URL.
-5. Substack and LinkedIn publish on their own schedulers. Confirm rather than assume: if the
-   Substack post is not live within ten minutes of the moment, say so and stop — do NOT click
-   Publish yourself, because that decision was made against a draft the author reviewed and
-   whatever went wrong needs a human.
-6. LinkedIn's Article copy links the canonical, so it is composed only after step 4 passes. If it
-   is still a draft, leave it and say so.
-7. Record it: post_url / blog_url / linkedin_url in publish.yaml, README and the dashboard
-   fragment to published, an append-only log entry, `dashboard.py sync`, release the lease, and
-   commit by path (never `git add` then a bare commit).
-8. Notify the author with: what is live, what is not, and what is left for them (the Note is
-   always theirs — never post it).
-"""
+    L = []
+    A = L.append
+    A(f'Publication day for {slug} — "{title}".')
+    A('')
+    A('You are a fresh session with no memory of how this was arranged. Everything you need is')
+    A(f'here and in the piece; read pieces/{slug}/README.md first, and do not improvise past this')
+    A('list. Anything that refuses, stops the run and is reported — never worked around.')
+    A('')
+    A(f'The desk is {root}. The moment is {fmt(moment)}.')
+    A(f'`python3 framework/tools/schedule.py check {slug}` must say OPEN before anything public')
+    A('happens. If it says EMBARGOED, stop: you woke early.')
+    A('')
+    A('IF YOU ARE RUNNING LATE — the app was closed and this fired at launch instead of on time —')
+    A('say so in your first line, then find out what already went out BEFORE you touch anything.')
+    A('The feed outlets are on their own platforms\' schedulers and have probably fired.')
+    A('')
+    A(f'1. `python3 framework/tools/lease.py acquire {slug} --what "publication day"`.')
+    n = 2
+    if lead:
+        A(f'{n}. THE CANONICAL GOES FIRST — {", ".join(lead)} '
+          f'({"still owed: " + ", ".join(debt) if debt else "already live; confirm, do not republish"}).')
+        if debt:
+            A(f'   Export only this piece (never `pieces/*` — that ships other sessions\' drafts):')
+            A(f'     md_to_site.py <bundle> pieces/{slug} --outlet {debt[0]} \\')
+            A(f'         --canonical-base <base> --syndicated {sub or "<feed>"} --apply')
+            A(f'     bundle_pieces.py <bundle>/content <store> --outlet {debt[0]} '
+              f'--images <bundle>/images --kind piece')
+            A(f'     store_publish.py <store>          # seed <store>/index.json from the LIVE one first')
+            A(f'   Then verify the reader URL yourself, cache-busted, before saying it is up.')
+    else:
+        A(f'{n}. This piece names no canonical outlet, so there is nothing to lead with.')
+    n += 1
+    if feed:
+        A(f'{n}. {", ".join(feed)} publish on their own schedulers. CONFIRM, do not assume, and')
+        A('   do NOT publish by hand: that decision was made against a draft the author reviewed,')
+        A('   and whatever went wrong needs a human. If it is not live within ten minutes of the')
+        A('   moment, say so and stop.')
+        n += 1
+    A(f'{n}. RECONCILE THE DESK. The platforms publish themselves; none of this happens without you.')
+    A(f'   a. Record the facts from the LIVE post, not from what was intended:')
+    A(f'        published_at: the post\'s own post_date · public_url · site_url')
+    A(f'        published: {{<outlet>: <date>}} — one date per outlet (schedule.published_on)')
+    A(f'   b. `piece_header.py --apply {slug}` — the header says Published, with the live URL.')
+    A(f'   c. `substack_verify.py --fresh pieces/{slug}` — body, footnotes, MARKS and ANCHORS.')
+    A(f'      MATCH is the only pass. DRIFT-MARKS and DRIFT-ANCHORS are real and are not text.')
+    A(f'   d. `substack_verify.py --archive --fresh` — the publication\'s own list, which is the')
+    A(f'      only check that can see a post the desk never composed.')
+    A(f'   e. `outlet_audit.py` — every outlet, both directions. It also checks the LINK PREVIEW,')
+    A(f'      which is the step a store publish structurally cannot do: og:image lives in the site')
+    A(f'      repo. If it reports PREVIEW 404: in the site repo `npm run og`, then commit ONLY the')
+    A(f'      new public/og/<slug>.jpg — it rewrites every preview and the others have not changed.')
+    A(f'   f. `check_status.py --outlets publishing/outlets.yaml` and `check_refs.py` — the corpus')
+    A(f'      still calls this piece unpublished in prose somewhere until you fix it.')
+    n += 1
+    if note:
+        A(f'{n}. THE NOTE ({note}) goes with the post, and may already be scheduled on Substack\'s')
+        A(f'   own scheduler for this moment — check before posting anything, or you post a second.')
+        A(f'     substack_notes.py record {slug}     # takes the id from the public feed')
+        A(f'     substack_notes.py verify {slug}')
+        A(f'   A fresh publication\'s own Note does not use the day\'s backlog slot.')
+        n += 1
+    A(f'{n}. Log it (append-only), flip README and the DASHBOARD.d fragment to published,')
+    A(f'   `dashboard.py sync`, release the lease, and commit BY PATH (never `git add` then a bare')
+    A(f'   commit — the index is shared). If the framework changed, push it before the instance.')
+    n += 1
+    A(f'{n}. Tell the author: what is live, what is not, and what is left for them. Say plainly')
+    A(f'   whether the subscriber email went — `email_sent_at` from GET /api/v1/drafts/<id>, never')
+    A(f'   the archive, which does not return that field at all.')
+    return '\n'.join(L) + '\n'
 
 
 def cmd_runbook(args):
@@ -396,13 +551,8 @@ def cmd_runbook(args):
     st, moment = state(pdir)
     if not moment:
         sys.exit(f'{os.path.basename(pdir)} has no {FIELD} — nothing to arm')
-    title = ''
-    for line in open(os.path.join(pdir, 'publish.yaml'), encoding='utf-8'):
-        if line.startswith('title:'):
-            title = line.split(':', 1)[1].strip().strip('"\'')
-            break
-    print(RUNBOOK.format(slug=os.path.basename(pdir), title=title, moment=fmt(moment),
-                         root=os.path.dirname(os.path.dirname(os.path.abspath(pdir)))))
+    root = os.path.dirname(os.path.dirname(os.path.abspath(pdir)))
+    print(_runbook_text(pdir, moment, root), end='')
     return 0
 
 
@@ -454,6 +604,36 @@ def cmd_record(args):
         sys.exit('refusing to record: --approved is required. A native schedule publishes with\n'
                  '  nobody watching, so the reading has to have happened first; name who approved\n'
                  '  it and when.')
+    # THE CANONICAL LEADS, AND THIS IS WHERE IT IS ENFORCED.
+    # A feed outlet's native schedule fires unattended. If the piece also names a CANONICAL
+    # outlet -- one configured `on_schedule: immediate` -- and that outlet is not live yet,
+    # then arming the feed schedules the exact half-published state `outlet_audit` exists to
+    # find: the post lands, and the canonical URL printed inside it 404s until somebody
+    # remembers. Measured 2026-09-12 on this desk, following the registry exactly.
+    # CONDITIONAL BY DESIGN (Eric, 2026-09-11: "refuse, but only if there *is* a canonical
+    # outlet and it is configured to publish immediately") -- a piece with no immediate
+    # outlet has no canonical to lead, and nothing here invents one.
+    if policy_for(_registry_outlets(), args.outlet) != IMMEDIATE:
+        debt = canonical_debt(pdir, _registry_path())
+        if debt:
+            sys.exit(
+                'refusing to record: the canonical has not been published.\n'
+                f'  {os.path.basename(pdir)} declares {", ".join(debt)}, which '
+                f'`outlets.yaml` configures `on_schedule: immediate` —\n'
+                '  the canonical publication, which is meant to be live BEFORE the outlets that\n'
+                '  wait for the moment. A native schedule on ' + str(args.outlet) + ' fires with\n'
+                '  nobody watching, so arming it now schedules a live post whose canonical URL\n'
+                '  answers 404.\n'
+                '  -> publish it first:\n'
+                '       python3 framework/tools/md_to_site.py <bundle> ' + f'pieces/{os.path.basename(pdir)}' + ' \\\n'
+                '           --outlet ' + debt[0] + ' --canonical-base <base> --syndicated '
+                + str(args.outlet) + ' --apply\n'
+                '       python3 framework/tools/bundle_pieces.py <bundle>/content <store> '
+                '--outlet ' + debt[0] + ' --images <bundle>/images --kind piece\n'
+                '       python3 framework/tools/store_publish.py <store>\n'
+                '     then record the date under `published:` in publish.yaml and re-run this.\n'
+                '  -> a sealed piece exports before its moment on an immediate outlet; that is\n'
+                '     what the policy is for.')
     path = os.path.join(pdir, 'publish.yaml')
     src = open(path, encoding='utf-8').read()
     from datetime import date
