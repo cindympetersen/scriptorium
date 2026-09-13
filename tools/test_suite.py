@@ -1329,8 +1329,11 @@ def unit_schedule(tmp):
     r = _sp.run([sys.executable, os.path.join(HERE, 'schedule.py'), 'arm', d, '--task', 't',
                  '--does', 'x', '--reviewed', 'A, today'], capture_output=True, text=True)
     man = open(os.path.join(d, 'publish.yaml'), encoding='utf-8').read()
+    # The writer quotes its values (2026-09-11, "arm: its own key, quoted values"), and
+    # this assertion was left expecting the bare form — so the suite went red on correct
+    # code and blocked every push to both repos until someone read it. Accept either.
     check('schedule: arm records who approved the drafts',
-          r.returncode == 0 and 'approved: A, today' in man, r.stderr.strip())
+          r.returncode == 0 and re.search(r'approved:\s*"?A, today"?', man), r.stderr.strip())
     r = _sp.run([sys.executable, os.path.join(HERE, 'schedule.py'), 'runbook', d],
                 capture_output=True, text=True)
     check('schedule: the runbook carries the moment and the late-fire instruction',
