@@ -1,10 +1,10 @@
 # The reference shelf — one shelf per desk, with a private copy off the machine
 
-> **Status: proposed, not built** (drafted 2026-09-13). Nothing here describes tooling
-> that exists yet. `references.py` today has `add`, `list`, `index`, `search` and `check`,
-> and files live under `books/<book>/references/`. The consolidation, `rehash`, `push` and
-> `pull` are all this design. Read it as the argument for building it and the spec to
-> build it against — not as instructions for a session working today.
+> **Status** (2026-09-13). **Part one — one shelf at the desk root — is BUILT.** Sources,
+> indexes and the manifest live in `references/`; the book is a manifest column;
+> `references.py check` is green on 52 files and 52 rows. **Part two — the S3 shelf — is
+> not.** `rehash`, the bucket and `push`/`pull` are still design. Read part two as the
+> argument for building it and the spec to build it against.
 
 The desk holds source texts so that a quotation is checked against a file rather than
 recalled, and the folder that holds them **denies by default**: `*`, plus one `!` line per
@@ -15,22 +15,22 @@ That rule is right and is not up for revision. This document is about the two bi
 leaves unpaid: the shelf is divided by a unit that does no work, and the half of it that
 cannot be committed exists in exactly one place.
 
-## Part one — one shelf, at the desk root
+## Part one — one shelf, at the desk root  ✅ built 2026-09-13
 
-### How it works today, and why the division is theatre
+### How it worked, and why the division was theatre
 
-Storage is **per book**: `books/<book>/references/`, each with its own `.index/`, its own
-manifest `README.md`, its own deny-by-default `.gitignore`. The book is in every path —
+Storage was **per book**: `books/<book>/references/`, each with its own `.index/`, its own
+manifest `README.md`, its own deny-by-default `.gitignore`. The book was in every path —
 `refdir(book)`, `index_for(book, file)`, `rows(book)`.
 
-Behavior is **per desk**. `catalog()` walks every book unless `--book` is passed, and
+Behavior was **per desk**. `catalog()` walks every book unless `--book` is passed, and
 nothing passes it: `search`, `check` and `check_quotes` all default to `None`, and
 [`gates.py`](../tools/gates.py) runs `check_quotes.py {piece}` with no `--book` at all.
 Nothing infers a piece's book from the piece. **In the gate that runs before every review
 and every publish, the desk already has one flat shelf** — wearing a per-book directory.
 
-And the division has never been exercised: three books exist and **one** has a
-`references/` folder. `alignment-fellowship` and `all-my-stories` have none.
+And the division was never exercised: three books existed and **one** had a
+`references/` folder. `alignment-fellowship` and `all-my-stories` had none.
 
 The framework itself already suspected this. `check_scripture.py` resolves its KJV index
 in this order:
@@ -74,17 +74,23 @@ once.
 `--book` survives as a filter over the manifest's Book column, which is what every call
 site meant anyway.
 
-### What the move costs, stated plainly
+### What the move cost — measured, not estimated
 
-Move 52 files and 49 indexes; rewrite the paths in a hand-maintained 50-row table;
+52 files and 49 indexes moved; 52 rows gained a Book column;
 rewrite one `.gitignore` and the root's defense-in-depth lines; collapse `refdir(book)` →
 `refdir()` and `books()` out of `references.py`, `refindex.py`, `check_quotes.py` and
 `check_scripture.py` (whose fallbacks then become dead and should go with it).
 
-Mechanical, one commit, `git mv` throughout so nothing restricted is re-added by accident.
-**`references.py check` must pass before and after**, and it is the proof the migration
-worked: it already reconciles manifest ↔ disk ↔ gitignore ↔ index, which is exactly the
-set of things a move can break.
+One commit. The new `references/.gitignore` was written and **probed with
+`git check-ignore` BEFORE a single byte moved** — the same order `references.py add` uses,
+and for the same one-way reason. Tracked files moved with `git mv`, ignored ones with
+`mv`; afterwards **17 ignored, 37 committable, 0 problems**, which is exactly the split
+that existed before. `references.py check` green (52 files, 52 rows, 49/49 indexed); suite
+742 passed, 0 failed.
+
+`check` gained one finding with the column: **`UNKNOWN BOOK`** / **`NO BOOK`**. The Book
+column is all that is left of the directories, so a row naming a book the desk does not
+have is a filter that silently matches nothing.
 
 ## Part two — the shelf goes to S3
 

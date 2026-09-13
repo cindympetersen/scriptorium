@@ -25,7 +25,7 @@ WHAT IT DOES NOT DO, SAID FIRST.  Holding a source locally does not make a claim
   page says what the prose claims it says. That is `review`'s re-open-the-sources read, and
   it is a human's. (Same warning `check_verified.py` gives about itself, for the same reason.)
 
-THE MANIFEST IS THE README, AND STAYS THE README.  `books/<book>/references/README.md`
+THE MANIFEST IS THE README, AND STAYS THE README.  `references/README.md`
   already carries one row per file — work, edition/provenance, date, redistribution — and
   CLAUDE.md names it as the index of what is on disk. A second machine-readable catalog
   beside it would be two sources of truth for one fact, which this desk has already learned
@@ -79,20 +79,30 @@ def root():
 
 
 def books(r=None):
+    """The books the desk has, for validating and filtering the manifest's Book column.
+
+    ONE SHELF, SINCE 2026-09-13. Sources used to live at books/<book>/references/, and
+    the division did no work: three books existed and one had a shelf, `catalog()`
+    walked every book unless `--book` was passed, nothing passed it, and `gates.py`
+    still does not. It also could not hold a source serving two books — Lawrence
+    grounds the Alignment Fellowship foundation and *Being Good* both — without
+    duplicating the file or filing it under a lie. The book is now a COLUMN in the
+    manifest: metadata about why a source is held, not a claim about where it lives.
+    (framework/docs/REFERENCE-SHELF.md.)
+    """
     r = r or root()
     base = os.path.join(r, "books")
     if not os.path.isdir(base):
         return []
-    return sorted(b for b in os.listdir(base)
-                  if os.path.isdir(os.path.join(base, b, "references")))
+    return sorted(b for b in os.listdir(base) if os.path.isdir(os.path.join(base, b)))
 
 
-def refdir(book, r=None):
-    return os.path.join(r or root(), "books", book, "references")
+def refdir(r=None):
+    return os.path.join(r or root(), "references")
 
 
-def readme(book, r=None):
-    return os.path.join(refdir(book, r), "README.md")
+def readme(r=None):
+    return os.path.join(refdir(r), "README.md")
 
 
 # ---------------------------------------------------------------- the manifest
@@ -135,11 +145,11 @@ def _restricted(cell):
     return _verdict(cell) != "ok"
 
 
-def rows(book, r=None):
+def rows(r=None):
     """Parse the README's manifest table. A row this cannot read is RETURNED as
     unparsed rather than skipped — a manifest checker that silently drops the rows
     it does not understand reports a clean bill it has not earned."""
-    path = readme(book, r)
+    path = readme(r)
     if not os.path.exists(path):
         return []
     out, in_table = [], False
@@ -158,19 +168,19 @@ def rows(book, r=None):
             name = None
             if m:
                 name = m.group("href") or m.group("label") or (m.group("bare") or "").strip()
-            if not name or len(cells) < 5:
+            if not name or len(cells) < 6:
                 out.append({"line": n, "file": name, "unparsed": line.rstrip()})
                 continue
             out.append({"line": n, "file": os.path.basename(name),
-                        "work": cells[1], "edition": cells[2], "added": cells[3],
-                        "redistribution": cells[4],
-                        "restricted": _restricted(cells[4]),
-                        "verdict_stated": _verdict(cells[4]) is not None})
+                        "book": cells[1], "work": cells[2], "edition": cells[3],
+                        "added": cells[4], "redistribution": cells[5],
+                        "restricted": _restricted(cells[5]),
+                        "verdict_stated": _verdict(cells[5]) is not None})
     return out
 
 
-def files_on_disk(book, r=None):
-    d = refdir(book, r)
+def files_on_disk(r=None):
+    d = refdir(r)
     if not os.path.isdir(d):
         return []
     return sorted(f for f in os.listdir(d)
@@ -179,9 +189,9 @@ def files_on_disk(book, r=None):
                   and not f.startswith("."))
 
 
-def index_for(book, filename, r=None):
+def index_for(filename, r=None):
     stem = re.sub(r"\.(pdf|txt|md|html?|epub)$", "", filename, flags=re.I)
-    return os.path.join(refdir(book, r), INDEX_DIR, stem + ".tsv.gz")
+    return os.path.join(refdir(r), INDEX_DIR, stem + ".tsv.gz")
 
 
 def sha256(path):
@@ -203,8 +213,8 @@ def gitignore_lines(r=None):
     return open(p, encoding="utf-8").read().splitlines() if os.path.exists(p) else []
 
 
-def ignore_entry(book, name):
-    return f"/books/{book}/references/{name}"
+def ignore_entry(name):
+    return f"/references/{name}"
 
 
 def is_ignored(rel, r=None):
@@ -215,7 +225,7 @@ def is_ignored(rel, r=None):
     then read as NOT ignored, which would have reported every restricted index as
     exposed and appended a redundant line for each one, forever. The question is "would
     git commit this", and only git answers it. (2026-09-11, adding the blanket
-    `/books/*/references/.index/` rule.)
+    `/references/.index/` rule.)
     """
     try:
         return subprocess.run(["git", "check-ignore", "-q", rel], cwd=r or root(),
@@ -257,15 +267,15 @@ DENY_HEADER = """# Deny by default. NOTHING in this folder is committed unless a
 """
 
 
-def deny_file(book, r=None):
-    return os.path.join(refdir(book, r), ".gitignore")
+def deny_file(r=None):
+    return os.path.join(refdir(r), ".gitignore")
 
 
-def ensure_allowed(book, name, r=None):
+def ensure_allowed(name, r=None):
     """Add a `!name` line to the folder's deny-by-default .gitignore, creating it if
     absent. Append-only and idempotent: another session may be adding a source in the
     same second, and no allow line is ever worth losing."""
-    path = deny_file(book, r)
+    path = deny_file(r)
     if not os.path.exists(path):
         with open(path, "w", encoding="utf-8") as f:
             f.write(DENY_HEADER)
@@ -396,16 +406,21 @@ def catalog(r=None, book=None):
     """Everything held, whether it is indexed, and whether it is restricted."""
     r = r or root()
     out = []
-    for b in ([book] if book else books(r)):
-        by_name = {row.get("file"): row for row in rows(b, r) if row.get("file")}
-        for f in files_on_disk(b, r):
-            idx = index_for(b, f, r)
-            row = by_name.get(f, {})
-            out.append({"book": b, "file": f, "path": os.path.join(refdir(b, r), f),
-                        "index": idx if os.path.exists(idx) else None,
-                        "indexable": f.lower().endswith(SOURCE_EXT),
-                        "work": row.get("work", ""), "restricted": row.get("restricted"),
-                        "manifested": f in by_name})
+    by_name = {row.get("file"): row for row in rows(r) if row.get("file")}
+    for f in files_on_disk(r):
+        idx = index_for(f, r)
+        row = by_name.get(f, {})
+        # `book` FILTERS, it does not locate. An unmanifested file has no book and is
+        # therefore in no filtered view — which is right: `check` reports it as having
+        # no manifest row, and that is the finding, not a missing shelf.
+        if book and row.get("book") != book:
+            continue
+        out.append({"book": row.get("book", ""), "file": f,
+                    "path": os.path.join(refdir(r), f),
+                    "index": idx if os.path.exists(idx) else None,
+                    "indexable": f.lower().endswith(SOURCE_EXT),
+                    "work": row.get("work", ""), "restricted": row.get("restricted"),
+                    "manifested": f in by_name})
     return out
 
 
@@ -426,7 +441,7 @@ def cmd_add(argv):
         print(f"no such file: {src}")
         return 1
     if book not in books():
-        print(f"no book '{book}' with a references/ folder. Have: {', '.join(books()) or '(none)'}")
+        print(f"no book '{book}'. Have: {', '.join(books()) or '(none)'}")
         return 1
     if "--restricted" not in argv and "--public" not in argv:
         print("say which: --restricted (in copyright / edition not redistributable) or --public.\n"
@@ -437,29 +452,29 @@ def cmd_add(argv):
 
     r = root()
     name = os.path.basename(src)
-    dest = os.path.join(refdir(book, r), name)
-    rel = f"books/{book}/references/{name}"
+    dest = os.path.join(refdir(r), name)
+    rel = f"references/{name}"
 
     # The .gitignore line goes in BEFORE the bytes land, when the file is restricted.
     # Copying first and ignoring second leaves a window in which another session's
     # `git add -A` can stage it, and that window is the only irreversible thing here.
     added_ignores = []
     if restricted:
-        if os.path.exists(deny_file(book, r)):
+        if os.path.exists(deny_file(r)):
             print("gitignore: nothing to write — this folder denies by default, so an "
                   "unlisted file is already ignored")
         else:
             # No deny-by-default file here: fall back to the old per-file root lines
             # rather than leave a restricted source unprotected.
             added_ignores = ensure_ignored(
-                [ignore_entry(book, name),
-                 ignore_entry(book, f"{INDEX_DIR}/{re.sub(r'[.][^.]+$', '', name)}.tsv.gz")], r)
+                [ignore_entry(name),
+                 ignore_entry(f"{INDEX_DIR}/{re.sub(r'[.][^.]+$', '', name)}.tsv.gz")], r)
             print(f"gitignore: +{len(added_ignores)} root entr"
                   f"{'y' if len(added_ignores)==1 else 'ies'} (no deny-by-default file here)")
     else:
-        if ensure_allowed(book, name, r):
-            print(f"gitignore: allowed in books/{book}/references/.gitignore "
-                  f"(the folder denies by default)")
+        if ensure_allowed(name, r):
+            print("gitignore: allowed in references/.gitignore "
+                  "(the folder denies by default)")
 
     if os.path.abspath(src) != os.path.abspath(dest):
         if os.path.exists(dest) and sha256(dest) != sha256(src):
@@ -475,7 +490,7 @@ def cmd_add(argv):
 
     scheme_out = ""
     if "--no-index" not in argv:
-        idx = index_for(book, name, r)
+        idx = index_for(name, r)
         try:
             scheme, got = build_index(dest, idx, opt("--scheme", "auto"))
             scheme_out = f" indexed ({scheme}: {got})"
@@ -499,9 +514,10 @@ def cmd_add(argv):
              "republish this file. Gitignored."
              if restricted else
              "✅ Public domain / redistributable. Safe to quote and redistribute.")
-    row = (f"| [{name}]({name}) | {work} | {prov} | {date.today():%Y-%m-%d} | {redis} |\n")
-    _append_row(readme(book, r), row)
-    print(f"manifest: row appended to books/{book}/references/README.md")
+    row = (f"| [{name}]({name}) | {book} | {work} | {prov} | "
+           f"{date.today():%Y-%m-%d} | {redis} |\n")
+    _append_row(readme(r), row)
+    print("manifest: row appended to references/README.md")
     if restricted:
         print("\nRestricted. Prove it cannot be staged before you commit anything:\n"
               f"  git check-ignore -v {rel}")
@@ -591,12 +607,12 @@ def cmd_index(argv):
     r = root()
     failed = 0
     for i in hits:
-        out = index_for(i["book"], i["file"], r)
+        out = index_for(i["file"], r)
         # The ignore line lands BEFORE the index exists, for the same one-way reason
         # `add` does it in that order.
         if i["restricted"]:
-            added = ensure_ignored([ignore_entry(i["book"],
-                                    f"{INDEX_DIR}/{os.path.basename(out)}")], r)
+            added = ensure_ignored(
+                [ignore_entry(f"{INDEX_DIR}/{os.path.basename(out)}")], r)
             if added:
                 print(f"  gitignore: +{added[0]}  (an index of a copyrighted source "
                       f"IS the copyrighted text)")
@@ -660,77 +676,86 @@ def cmd_search(argv):
 def cmd_check(argv):
     r = root()
     bad = 0
-    ignored = set(l.strip() for l in gitignore_lines(r))
-    for b in books(r):
-        rws = rows(b, r)
-        unparsed = [x for x in rws if "unparsed" in x]
-        by_name = {x["file"]: x for x in rws if x.get("file") and "unparsed" not in x}
-        disk = set(files_on_disk(b, r))
-        print(f"\n{b}/references/  {len(disk)} file(s), {len(by_name)} manifest row(s)")
-        for u in unparsed:
-            print(f"  UNREADABLE ROW line {u['line']}: {u['unparsed'][:80]}")
+    rws = rows(r)
+    unparsed = [x for x in rws if "unparsed" in x]
+    by_name = {x["file"]: x for x in rws if x.get("file") and "unparsed" not in x}
+    disk = set(files_on_disk(r))
+    known = set(books(r))
+    print(f"references/  {len(disk)} file(s), {len(by_name)} manifest row(s)")
+    for u in unparsed:
+        print(f"  UNREADABLE ROW line {u['line']}: {u['unparsed'][:80]}")
+        bad += 1
+    for f in sorted(disk - set(by_name)):
+        print(f"  NO MANIFEST ROW: {f}")
+        bad += 1
+    for f in sorted(set(by_name) - disk):
+        print(f"  ROW WITH NO FILE: {f}  (line {by_name[f]['line']})")
+        bad += 1
+    if not os.path.exists(deny_file(r)):
+        print("  NO DENY-BY-DEFAULT .gitignore in this folder — a new file here is "
+              "committable until somebody remembers a line. "
+              "`references.py add --public` creates it.")
+        bad += 1
+    for f in sorted(disk & set(by_name)):
+        row = by_name[f]
+        rel = f"references/{f}"
+        # The Book column is the only thing left of the old per-book directories, so it
+        # has to be real: a row naming a book the desk does not have is a filter that
+        # silently matches nothing.
+        b = (row.get("book") or "").strip()
+        if not b:
+            print(f"  NO BOOK: {f}  (line {row['line']}) — the Book column is empty, so "
+                  f"`--book` can never select this row")
             bad += 1
-        for f in sorted(disk - set(by_name)):
-            print(f"  NO MANIFEST ROW: {f}")
+        elif b not in known:
+            print(f"  UNKNOWN BOOK {b!r}: {f}  (line {row['line']}) — no books/{b}/. "
+                  f"Have: {', '.join(sorted(known)) or '(none)'}")
             bad += 1
-        for f in sorted(set(by_name) - disk):
-            print(f"  ROW WITH NO FILE: {f}  (line {by_name[f]['line']})")
+        if not row["restricted"] and is_ignored(rel, r) and not tracked(rel, r):
+            # The safe failure, made visible. Deny-by-default means an unlisted public
+            # source is silently uncommittable; silence is what turns a safe failure
+            # into a lost one.
+            print(f"  PUBLIC BUT NOT COMMITTABLE: {f} — held, redistributable, and "
+                  f"ignored. Add `!{f}` to references/.gitignore.")
             bad += 1
-        if not os.path.exists(deny_file(b, r)):
-            print(f"  NO DENY-BY-DEFAULT .gitignore in this folder — a new file here is "
-                  f"committable until somebody remembers a line. "
-                  f"`references.py add --public` creates it.")
-        for f in sorted(disk & set(by_name)):
-            row = by_name[f]
-            rel = f"books/{b}/references/{f}"
-            if not row["restricted"] and is_ignored(rel, r) and not tracked(rel, r):
-                # The safe failure, made visible. Deny-by-default means an unlisted
-                # public source is silently uncommittable; silence is what turns a safe
-                # failure into a lost one.
-                print(f"  PUBLIC BUT NOT COMMITTABLE: {f} — held, redistributable, and "
-                      f"ignored. Add `!{f}` to books/{b}/references/.gitignore.")
+        if not row.get("verdict_stated"):
+            # Fail-closed protects the bytes; this gets the ROW fixed. A cell this
+            # parser cannot classify is treated as restricted AND reported, because one
+            # such row sat unreadable through two weeks of shelf growth and nothing
+            # would ever have told anyone.
+            print(f"  REDISTRIBUTION NOT STATED — no {' / '.join(VERDICT_MARKS)} in "
+                  f"the last column, so this file is treated as RESTRICTED until the "
+                  f"row says otherwise: {f}  (line {row['line']})")
+            bad += 1
+        # If the FILE is already gitignored, its index must be too — whatever the
+        # manifest row says, and especially when the row says nothing. The stricter of
+        # the two signals wins, because only one direction is recoverable.
+        file_ignored = is_ignored(rel, r)
+        if row["restricted"] or file_ignored:
+            if row["restricted"] and not file_ignored:
+                print(f"  ⚠️  RESTRICTED AND NOT GITIGNORED: {rel}")
                 bad += 1
-            if not row.get("verdict_stated"):
-                # Fail-closed protects the bytes; this gets the ROW fixed. A cell this
-                # parser cannot classify is treated as restricted AND reported, because
-                # one such row sat unreadable through two weeks of shelf growth and
-                # nothing would ever have told anyone. (Named 2026-09-11 by the session
-                # that maintains the manifest.)
-                print(f"  REDISTRIBUTION NOT STATED — no {' / '.join(VERDICT_MARKS)} in "
-                      f"the last column, so this file is treated as RESTRICTED until the "
-                      f"row says otherwise: {f}  (line {row['line']})")
+            if row["restricted"] and tracked(rel, r):
+                print(f"  ⚠️  RESTRICTED AND TRACKED BY GIT: {rel}")
                 bad += 1
-            # If the FILE is already gitignored, its index must be too — whatever the
-            # manifest row says, and especially when the row says nothing. One source
-            # here was ignored on disk with no verdict written in its row, so the
-            # verdict-driven check would have left its index committable. The stricter
-            # of the two signals wins, because only one direction is recoverable.
-            file_ignored = is_ignored(rel, r)
-            if row["restricted"] or file_ignored:
-                if row["restricted"] and not file_ignored:
-                    print(f"  ⚠️  RESTRICTED AND NOT GITIGNORED: {rel}")
-                    bad += 1
-                if row["restricted"] and tracked(rel, r):
-                    print(f"  ⚠️  RESTRICTED AND TRACKED BY GIT: {rel}")
-                    bad += 1
-                idx = index_for(b, f, r)
-                if os.path.exists(idx) and not is_ignored(os.path.relpath(idx, r), r):
-                    print(f"  ⚠️  INDEX OF A RESTRICTED SOURCE NOT GITIGNORED: "
-                          f"{os.path.relpath(idx, r)}  (an index IS the text)")
-                    bad += 1
-        n_idx = n_indexable = 0
-        for f in sorted(disk):
-            n_indexable += f.lower().endswith(SOURCE_EXT)
-            idx = index_for(b, f, r)
-            if not os.path.exists(idx):
-                continue
-            n_idx += 1
-            v = text_layer_verdict(os.path.join(refdir(b, r), f), idx)
-            if v:
-                print(f"  ⚠️  {f}: {v}")
+            idx = index_for(f, r)
+            if os.path.exists(idx) and not is_ignored(os.path.relpath(idx, r), r):
+                print(f"  ⚠️  INDEX OF A RESTRICTED SOURCE NOT GITIGNORED: "
+                      f"{os.path.relpath(idx, r)}  (an index IS the text)")
                 bad += 1
-        print(f"  indexed: {n_idx}/{n_indexable} indexable "
-              f"({len(disk)-n_indexable} page image(s))")
+    n_idx = n_indexable = 0
+    for f in sorted(disk):
+        n_indexable += f.lower().endswith(SOURCE_EXT)
+        idx = index_for(f, r)
+        if not os.path.exists(idx):
+            continue
+        n_idx += 1
+        v = text_layer_verdict(os.path.join(refdir(r), f), idx)
+        if v:
+            print(f"  ⚠️  {f}: {v}")
+            bad += 1
+    print(f"  indexed: {n_idx}/{n_indexable} indexable "
+          f"({len(disk)-n_indexable} page image(s))")
     print("\nOK" if not bad else f"\n{bad} problem(s)")
     return 0 if not bad else 4
 

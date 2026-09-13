@@ -46,12 +46,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # The INDEX IS CONTENT AND LIVES IN THE INSTANCE, not here. The framework stays
 # generic — no publication specifics, no source texts — and a whole Bible is a
 # source text with its own provenance and redistribution status, which is what
-# `books/<name>/references/` exists to record. The framework ships the builder;
-# the instance ships the book.
+# `references/` exists to record. The framework ships the builder; the instance
+# ships the book.
+#
+# `references/kjv.tsv.gz` was already the first candidate before the shelf was
+# consolidated there on 2026-09-13 — this file preferred a desk-root references/
+# over the book path from the start, which is part of why the per-book division
+# was judged to be doing no work. The book paths stay as a fallback for a desk
+# that has not migrated yet. (framework/docs/REFERENCE-SHELF.md.)
 INDEX_CANDIDATES = [
     os.environ.get("KJV_INDEX", ""),
     "references/kjv.tsv.gz",
-    "books/being-good/references/kjv.tsv.gz",
 ]
 
 
@@ -60,7 +65,7 @@ def find_index():
     for c in INDEX_CANDIDATES:
         if c and os.path.exists(c):
             return c
-    hits = sorted(glob.glob("books/*/references/kjv.tsv.gz"))
+    hits = sorted(glob.glob("books/*/references/kjv.tsv.gz"))   # pre-2026-09-13 desks
     return hits[0] if hits else None
 
 # The book must come from the closed set. A loose pattern matched "And 22:17" as a
@@ -355,7 +360,7 @@ def main():
         print("no KJV index found. The framework ships the builder; the index is\n"
               "content and lives in the instance, with its provenance recorded:\n"
               "  python3 framework/tools/refindex.py <kjv.pdf> --scheme kjv \\\n"
-              "      --out books/<name>/references/kjv.tsv.gz\n"
+              "      --out references/kjv.tsv.gz\n"
               "then add a row to that folder's README (work, edition, date,\n"
               "redistribution status), as every other reference file has.")
         sys.exit(1)

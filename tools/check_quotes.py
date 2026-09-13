@@ -16,7 +16,7 @@ WHY THIS EXISTS
   of that sentence is `references.py`, which brings a source in and indexes it.)
 
 THE OUTCOME THAT MATTERS MOST IS **NOT HELD**.
-  A quotation whose source is not in `books/<book>/references/` was checked by nothing.
+  A quotation whose source is not in `references/` was checked by nothing.
   That is the state in which a model supplies wording from memory, and today it is
   invisible — a piece with twelve unheld quotations looks exactly like a piece with none.
   So it is a finding, printed as loudly as drift, and it exits non-zero.

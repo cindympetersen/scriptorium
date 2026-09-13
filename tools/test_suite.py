@@ -378,11 +378,15 @@ def unit_reference_add(tmp):
     R = importlib.util.module_from_spec(spec); spec.loader.exec_module(R)
 
     home = os.path.join(tmp, 'inst')
-    refs = os.path.join(home, 'books', 'tst', 'references')
+    # ONE SHELF at the desk root, with the book as a manifest COLUMN (2026-09-13).
+    # books/tst/ still has to exist: `add` validates --book against the books the desk
+    # has, so a row can never name a book that is not there.
+    refs = os.path.join(home, 'references')
     os.makedirs(refs)
+    os.makedirs(os.path.join(home, 'books', 'tst'))
     open(os.path.join(refs, 'README.md'), 'w').write(
-        '# References\n\n| File | Work | Edition / provenance | Added | Redistribution |\n'
-        '|---|---|---|---|---|\n\n## A section after the table\n\nProse.\n')
+        '# References\n\n| File | Book | Work | Edition / provenance | Added | Redistribution |\n'
+        '|---|---|---|---|---|---|\n\n## A section after the table\n\nProse.\n')
     src = os.path.join(tmp, 'incoming.txt')
     open(src, 'w').write('\n'.join(f'a sentence number {i} in the held source'
                                     for i in range(120)))
@@ -403,14 +407,16 @@ def unit_reference_add(tmp):
     check('references add: a manifest row is appended', '[incoming.txt](incoming.txt)' in readme)
     check('references add: the row carries the work and a hash',
           'A Held Work' in readme and 'sha256' in readme)
+    check('references add: the row carries the BOOK, which is how --book selects it',
+          '| tst |' in readme)
     check('references add: the row goes INSIDE the table, not at end of file',
           readme.index('incoming.txt') < readme.index('## A section after the table'))
 
     ig = open(os.path.join(home, '.gitignore')).read()
     check('references add: a restricted file is gitignored',
-          '/books/tst/references/incoming.txt' in ig)
+          '/references/incoming.txt' in ig)
     check("references add: and so is its index — an index IS the text",
-          '/books/tst/references/.index/incoming.tsv.gz' in ig)
+          '/references/.index/incoming.tsv.gz' in ig)
 
     # And the round trip: the thing just added is findable by search, at its line.
     cat = R.catalog(r=home, book='tst')
@@ -436,7 +442,7 @@ def unit_reference_add(tmp):
     check('references add: README and the folder rules allow themselves',
           '!README.md' in body and '!.gitignore' in body)
     n_before = body.count('!open-work.txt')
-    R.ensure_allowed('tst', 'open-work.txt', home)
+    R.ensure_allowed('open-work.txt', home)
     check('references add: the allow line is idempotent',
           open(deny).read().count('!open-work.txt') == n_before)
 

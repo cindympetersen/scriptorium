@@ -53,7 +53,7 @@ Add `--names <named figures>` work by hand where a piece needs it, and run
 `md_to_substack.py` when you want the converter's counts; everything else is in the runner.
 
 **`check_quotes.py` is the gate that changes what the source re-read is for.** It matches every
-non-scripture quotation against the copy of the source held in `books/<book>/references/` and
+non-scripture quotation against the copy of the source held in `references/` and
 reports the page. What it cannot do is tell you the page says what the prose claims — so the
 re-read stops being a transcription check and becomes the only thing it was ever good for:
 does the source bear the weight the argument puts on it. A **NOT HELD** finding means the
@@ -75,7 +75,7 @@ This is the step that separates a review from a proofread, and it finds the
 findings worth having.
 
 - **Re-open the primary source for every claim the argument leans on** — the PDF in
-  `books/<book>/references/`, the scan, the scripture ledger in `notes.md`. Not the
+  `references/`, the scan, the scripture ledger in `notes.md`. Not the
   notes *about* the source: the source.
 - **Check each quotation character by character** against it — the dashes, the
   capitals, the ellipses. A piece whose method is verbatim quotation is convicted by

@@ -498,7 +498,7 @@ from `GET /api/v1/drafts/<id>`, which does carry it, and from the dialog — nev
    this edition. A first corpus run (2026-09-10, 144 quotations) found 17 across 11 pieces.
 
    **The index is content and lives in the instance**, built once from a PDF the author owns:
-   `framework/tools/refindex.py <kjv.pdf> --scheme kjv --out books/<name>/references/kjv.tsv.gz`,
+   `framework/tools/refindex.py <kjv.pdf> --scheme kjv --out references/kjv.tsv.gz`,
    with a provenance row in that folder's README. `--verify` refuses an index with interior
    gaps, because a chapter missing a verse answers "not found" for a locus that exists, and the
    reader of that answer cannot tell which side is wrong.
@@ -510,7 +510,7 @@ from `GET /api/v1/drafts/<id>`, which does carry it, and from the dialog — nev
    that source's index, reporting the page or line the words are on.
 
    **The finding that matters most is NOT HELD** — a footnote citing a source that is not in
-   `books/<book>/references/`, whose quotations were therefore checked by *nothing*. That is
+   `references/`, whose quotations were therefore checked by *nothing*. That is
    the state in which wording gets supplied from memory, and before this tool it was invisible:
    a piece with twelve unheld quotations looked exactly like a piece with none. Bring the source
    in rather than waving it through:
