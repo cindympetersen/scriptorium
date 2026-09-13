@@ -40,7 +40,9 @@ USAGE
   references.py list [--book <name>] [--unindexed]
   references.py index <file-or-path> [--scheme ...]        # (re)build one index
   references.py search "<phrase>" [--book <name>] [--source <substr>] [-n <hits>]
-  references.py check                                      # manifest ↔ disk ↔ gitignore ↔ index
+  references.py rehash [--dry-run] [--force]               # full sha256 into every row
+  references.py check                                      # manifest ↔ disk ↔ gitignore
+                                                           #   ↔ index ↔ digest
 
 EXIT
   0  fine
@@ -109,6 +111,12 @@ def readme(r=None):
 
 ROW_RE = re.compile(r"^\|\s*(?:\[(?P<label>[^\]]+)\]\((?P<href>[^)]+)\)|(?P<bare>[^|]+?))\s*\|")
 
+# The digest lives in the provenance cell, where a human wrote it, rather than in a
+# column of its own — one place per fact, and the cell already reads as provenance.
+# It is matched loosely because fifty rows were hand-written before there was a tool:
+# with or without backticks, with an ellipsis or without.
+DIGEST_RE = re.compile(r"sha256\s*`?([0-9a-f]{6,64})(?:…|\.\.\.)?`?", re.I)
+
 
 # The manifest's verdict markers, and there are THREE. ❌ was missed by the first
 # version of this parser, which knew only ✅ and ⚠️ — so the one row that used it
@@ -171,8 +179,10 @@ def rows(r=None):
             if not name or len(cells) < 6:
                 out.append({"line": n, "file": name, "unparsed": line.rstrip()})
                 continue
+            dm = DIGEST_RE.search(cells[3])
             out.append({"line": n, "file": os.path.basename(name),
                         "book": cells[1], "work": cells[2], "edition": cells[3],
+                        "digest": (dm.group(1).lower() if dm else None),
                         "added": cells[4], "redistribution": cells[5],
                         "restricted": _restricted(cells[5]),
                         "verdict_stated": _verdict(cells[5]) is not None})
@@ -504,7 +514,11 @@ def cmd_add(argv):
     # The manifest row, in the table's own style.
     edition = opt("--edition", "").strip()
     note = opt("--note", "").strip()
-    prov = "; ".join(x for x in [edition, f"sha256 `{digest[:16]}…`",
+    # THE FULL DIGEST, not a prefix. A truncated hash proves the bytes to a human
+    # reading the row and addresses nothing; the S3 shelf keys an object on it
+    # (framework/docs/REFERENCE-SHELF.md), and `check` can only detect a file that has
+    # been swapped under its own name if the row carries the whole thing.
+    prov = "; ".join(x for x in [edition, f"sha256 `{digest}`",
                                  f"added {date.today():%Y-%m-%d}"] if x)
     if note:
         prov += f". {note}"
@@ -673,6 +687,68 @@ def cmd_search(argv):
     return 0
 
 
+def cmd_rehash(argv):
+    """Fill the FULL sha256 into every manifest row, once.
+
+    Fifty rows were hand-written with a 16-character prefix and an ellipsis, and two
+    with no digest at all. A prefix proves the bytes to a human reading the row and
+    addresses nothing: the S3 shelf keys an object on the hash
+    (framework/docs/REFERENCE-SHELF.md), and nothing can notice a file swapped under its
+    own name unless the row carries the whole digest to compare against.
+
+    A row whose existing prefix does NOT match the file is left alone and reported. That
+    is the one case where rewriting would destroy evidence — the row describes bytes
+    that are not the bytes on disk, and which of the two is wrong is not this tool's
+    call. `--force` rewrites them anyway, and says which.
+    """
+    r = root()
+    force = "--force" in argv
+    dry = "--dry-run" in argv
+    path = readme(r)
+    lines = open(path, encoding="utf-8").read().splitlines(keepends=True)
+    disk = set(files_on_disk(r))
+    filled = updated = kept = 0
+    conflicts = []
+    for row in rows(r):
+        f = row.get("file")
+        if not f or "unparsed" in row or f not in disk:
+            continue
+        actual = sha256(os.path.join(refdir(r), f))
+        have = row.get("digest")
+        if have == actual:
+            kept += 1
+            continue
+        i = row["line"] - 1
+        line = lines[i]
+        if have and not actual.startswith(have):
+            conflicts.append((f, have, actual, i))
+            if not force:
+                continue
+        if have:
+            line = DIGEST_RE.sub(f"sha256 `{actual}`", line, count=1)
+            updated += 1
+        else:
+            # No digest anywhere in the row: add one to the end of the provenance cell,
+            # which is where every other row keeps it.
+            cells = line.rstrip("\n").split("|")
+            cells[4] = cells[4].rstrip() + f", sha256 `{actual}` "
+            line = "|".join(cells) + "\n"
+            filled += 1
+        lines[i] = line
+    if not dry:
+        open(path, "w", encoding="utf-8").write("".join(lines))
+    for f, have, actual, _ in conflicts:
+        print(f"  ⚠️  DIGEST MISMATCH: {f}\n"
+              f"      row says  {have}…\n"
+              f"      file is   {actual}\n"
+              f"      The row describes bytes that are not on disk. Decide which is "
+              f"wrong before rewriting; `--force` rewrites the row to the file.")
+    print(f"{'(dry run) ' if dry else ''}"
+          f"{updated} row(s) completed, {filled} filled in, {kept} already full, "
+          f"{len(conflicts)} mismatch(es)")
+    return 4 if conflicts and not force else 0
+
+
 def cmd_check(argv):
     r = root()
     bad = 0
@@ -718,6 +794,29 @@ def cmd_check(argv):
             print(f"  PUBLIC BUT NOT COMMITTABLE: {f} — held, redistributable, and "
                   f"ignored. Add `!{f}` to references/.gitignore.")
             bad += 1
+        # THE DIGEST IS A SECOND RECORD OF THE SAME FACT, written at a different time,
+        # and the only thing that can notice a file swapped under its own name — a
+        # re-download that changed edition while the row went on describing the old one.
+        d = row.get("digest")
+        if not d:
+            print(f"  NO DIGEST: {f}  (line {row['line']}) — nothing can tell whether "
+                  f"these are the bytes the row describes. `references.py rehash`")
+            bad += 1
+        else:
+            actual = sha256(os.path.join(refdir(r), f))
+            if not actual.startswith(d):
+                # A MISMATCH IS NOT A TRUNCATION, and the two must not share a message.
+                # `rehash` deliberately refuses this row, so telling the reader to run it
+                # would send them to a tool that does nothing and looks broken.
+                print(f"  ⚠️  DIGEST MISMATCH: {f}  (line {row['line']}) — the row "
+                      f"describes bytes that are not on disk\n"
+                      f"      row says  {d}{'…' if len(d) < 64 else ''}\n"
+                      f"      file is   {actual}")
+                bad += 1
+            elif len(d) < 64:
+                print(f"  TRUNCATED DIGEST: {f}  (line {row['line']}) — the prefix "
+                      f"matches, but a prefix addresses nothing. `references.py rehash`")
+                bad += 1
         if not row.get("verdict_stated"):
             # Fail-closed protects the bytes; this gets the ROW fixed. A cell this
             # parser cannot classify is treated as restricted AND reported, because one
@@ -767,7 +866,7 @@ def main():
         return 1
     cmd, rest = argv[0], argv[1:]
     fn = {"add": cmd_add, "list": cmd_list, "index": cmd_index,
-          "search": cmd_search, "check": cmd_check}.get(cmd)
+          "search": cmd_search, "check": cmd_check, "rehash": cmd_rehash}.get(cmd)
     if not fn:
         print(f"unknown command: {cmd}\n")
         print(__doc__.strip())
