@@ -339,13 +339,27 @@ SCAN_JS = """await (async () => {
   const hash = async a => Promise.all(a.map(t => sha(sameText(t))));   // comparison domain
   const T = document.querySelector('textarea[placeholder="Title"]');
   const S = document.querySelector('textarea[placeholder="Add a subtitle\\u2026"]');
-  return JSON.stringify({
+  const scan = JSON.stringify({
     url: location.href, marksVersion: 1,
     title: T ? T.value : '', subtitle: S ? S.value : '',
     counts: { body: body.length, fns: fns.length },
     body: await hash(body), fns: await hash(fns),
     bodyMarks: await hash(bodyM), fnsMarks: await hash(fnsM)
   });
+  // THE SCAN HASHES ITSELF, so the transcription off the page can be PROVED rather than
+  // trusted. A scan comes back as ten kilobytes of hex that an agent then writes into a
+  // file by hand — the exact transcription risk `pane_carry` removes on the way IN, with
+  // nothing guarding the way out. `seal` failing closed made a slip a refusal rather than
+  // a wrong baseline, which is safe but tells you nothing about WHERE it went wrong; and
+  // `plan` had no such guard at all, so a mistyped hash there reads as a real difference
+  // and sends somebody to re-sync a block that never changed.
+  //
+  // Same rule as the carrier: identify the bytes at the point of use. (2026-09-14, after
+  // three baselines were resealed by hand and the hash was computed ad hoc each time.)
+  const digest = [...new Uint8Array(await crypto.subtle.digest(
+      'SHA-256', new TextEncoder().encode(scan)))]
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+  return JSON.stringify({ scanVersion: 2, sha256: digest, scan });
 })()"""
 
 FETCH_JS = """(() => {
@@ -375,11 +389,46 @@ def cmd_scan(piece_dir, out_js):
     d = draft_state(piece_dir)
     print(f"wrote {out_js}")
     print(f"draft: body={len(d['body'])} fns={len(d['fns'])}  post_url~{d['post_url'] or '(none)'}")
-    print("Run it in the live post's editor; save the JSON it returns, then: plan <piece> <live.json>")
+    print("Run it in the live post's editor. SAVE ITS WHOLE RETURN VALUE — the wrapper as")
+    print("well as the scan inside it: the snippet hashes its own output, and `plan` and")
+    print("`seal` check that hash, so a slip in writing ten kilobytes of hex out by hand is")
+    print("refused as a TRANSCRIPTION error instead of read as a difference in the post.")
+    print("Then: plan <piece> <live.json>")
+
+
+def load_scan(path):
+    """Read a saved scan, and PROVE the transcription rather than trusting it.
+
+    A scan comes off the page as ten kilobytes of hex that somebody then writes into a
+    file by hand. Since 2026-09-14 the snippet hashes its own output, so the file it is
+    saved into carries {scanVersion, sha256, scan} and this can check one against the
+    other. A mismatch is a REFUSAL naming the two digests: the failure is transcription,
+    not content, and the two must never wear the same face — a mistyped hash inside a scan
+    reads downstream as a real difference and sends somebody to re-sync a block that never
+    changed.
+
+    An older bare scan (no wrapper) is still accepted, and says so once. It cannot be
+    checked — that is the whole reason for the wrapper — so it is a note, not a silence.
+    """
+    raw = json.load(open(path))
+    if not (isinstance(raw, dict) and 'scan' in raw and 'sha256' in raw):
+        print(f"note: {os.path.basename(path)} is a bare scan with no self-hash — it "
+              f"cannot be checked for transcription. Re-run `scan` for a snippet that "
+              f"carries one.")
+        return raw
+    got = hashlib.sha256(raw['scan'].encode('utf-8')).hexdigest()
+    if got != raw['sha256']:
+        print("REFUSING: the scan does not hash to the digest it carries — this is a "
+              "TRANSCRIPTION error, not a difference in the post.")
+        print(f"  the page computed  {raw['sha256']}")
+        print(f"  this file hashes   {got}")
+        print("  Copy the snippet's whole return value again; do not edit it by hand.")
+        sys.exit(8)
+    return json.loads(raw['scan'])
 
 
 def cmd_plan(piece_dir, live_json, out_plan):
-    live = json.load(open(live_json))
+    live = load_scan(live_json)
     if live.get('error'):
         print(f"scan failed: {live['error']}")
         sys.exit(1)
@@ -705,7 +754,7 @@ PUSH_JS = """await (async () => {
 
 def cmd_push(piece_dir, plan_json, live_json, out_js):
     plan = json.load(open(plan_json))
-    live = json.load(open(live_json))
+    live = load_scan(live_json)
     d = draft_state(piece_dir)
     if any(r['state'] == 'conflict' for r in plan['rows']):
         print("REFUSING: the plan has conflicts. Resolve them first (see `pull`).")
@@ -963,7 +1012,7 @@ def cmd_detect(piece_dir, live_json):
     author noticed. Hence this command: the check is the tool's job, not the operator's
     memory.
     """
-    live = json.load(open(live_json))
+    live = load_scan(live_json)
     top = subprocess.run(['git', '-C', piece_dir, 'rev-parse', '--show-toplevel'],
                          capture_output=True, text=True, check=True).stdout.strip()
     rel = os.path.relpath(os.path.abspath(os.path.join(piece_dir, 'draft.md')), top)
@@ -1022,7 +1071,7 @@ def cmd_resolve(piece_dir, live_json, args):
     Take-draft after editing the draft by hand is the normal shape: incorporate whatever live
     had that you want, put the finished text in draft.md, then say so here.
     """
-    live = json.load(open(live_json))
+    live = load_scan(live_json)
     base = load_baseline(piece_dir)
     if base is None:
         print("no baseline to resolve against.")
@@ -1073,7 +1122,7 @@ def cmd_seed(piece_dir, mode, arg):
         body_m, fns_m = [HM(r) for r in d['bodyMarks']], [HM(r) for r in d['fnsMarks']]
         note = 'seeded from draft.md as it stands'
     elif mode == '--from-live':
-        live = json.load(open(arg))
+        live = load_scan(arg)
         title, subtitle = live['title'], live['subtitle']
         body_h, fns_h = live['body'], live['fns']
         body_m, fns_m = live.get('bodyMarks'), live.get('fnsMarks')
@@ -1158,7 +1207,7 @@ def _warn_if_draft_uncommitted(piece_dir):
 
 
 def cmd_seal(piece_dir, live_json):
-    live = json.load(open(live_json))
+    live = load_scan(live_json)
     d = draft_state(piece_dir)
     db, df = [H(t) for t in d['body']], [H(t) for t in d['fns']]
     dbm, dfm = [HM(r) for r in d['bodyMarks']], [HM(r) for r in d['fnsMarks']]

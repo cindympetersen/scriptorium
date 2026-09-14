@@ -90,8 +90,19 @@ next completed `seal`; nothing needs re-sealing on purpose.
 Each browser step is one JS eval in the live post's editor.
 
 1. **Scan.** `python3 framework/tools/substack_sync.py scan pieces/<name> scan.js`
-   Run it in the editor; save the JSON it returns. It returns title, subtitle and one hash
-   per block — not the text, so a 6,000-word essay costs a few hundred bytes to compare.
+   Run it in the editor; **save its whole return value**, wrapper and all. It returns
+   title, subtitle and one hash per block — not the text, so a 6,000-word essay costs a
+   few hundred bytes to compare.
+
+   **The scan hashes itself, so save it verbatim and never tidy it.** The return is
+   `{scanVersion, sha256, scan}`, and `plan`, `seal`, `push`, `detect` and `resolve` all
+   check the digest before reading a word of it. That is there because a scan is
+   kilobytes of hex an agent writes into a file by hand — the transcription risk
+   `pane_carry` removes on the way *in*, with nothing on the way out. `seal` failed closed
+   on a slip, which is safe and tells you nothing about where it went wrong; **`plan` had
+   no guard at all, so a mistyped hash read as a REAL difference and would send you to
+   re-sync a block that never changed.** A mismatch now refuses (exit 8) and prints both
+   digests. An older bare scan still loads and says out loud that it cannot be checked.
 2. **Plan.** `python3 framework/tools/substack_sync.py plan pieces/<name> live.json plan.json`
    Classifies every block and prints the tally. **Read it before doing anything else.**
    Structural rows (a block added or removed on one side) are described and never

@@ -363,6 +363,65 @@ def unit_references(tmp):
           R.text_layer_verdict(src, out) is None)
 
 
+def unit_scan_hash(tmp):
+    """A saved scan proves its own transcription.
+
+    A scan comes off the page as ten kilobytes of hex that somebody writes into a file by
+    hand. `seal` failed closed on a slip, which is safe and says nothing about where it
+    went wrong; `plan` had no guard at all, so a mistyped hash there reads as a REAL
+    difference and sends somebody to re-sync a block that never changed. The snippet now
+    hashes its own output and the loader checks it. (2026-09-14, after three baselines
+    were resealed by hand and the digest was computed ad hoc each time.)
+    """
+    print("\n-- substack_sync: a scan proves its own transcription -----------------")
+    import io, contextlib, hashlib, json, importlib.util, os
+    spec = importlib.util.spec_from_file_location(
+        'substack_sync', os.path.join(os.path.dirname(__file__), 'substack_sync.py'))
+    SS = importlib.util.module_from_spec(spec); spec.loader.exec_module(SS)
+
+    inner = json.dumps({'url': 'https://x.substack.com/publish/post/1', 'marksVersion': 1,
+                        'title': 'T', 'subtitle': 'S',
+                        'counts': {'body': 1, 'fns': 0},
+                        'body': ['abc123abc123abc1'], 'fns': [],
+                        'bodyMarks': ['e3b0c44298fc1c14'], 'fnsMarks': []})
+    digest = hashlib.sha256(inner.encode()).hexdigest()
+
+    good = os.path.join(tmp, 'scan-good.json')
+    open(good, 'w').write(json.dumps({'scanVersion': 2, 'sha256': digest, 'scan': inner}))
+    with contextlib.redirect_stdout(io.StringIO()):
+        live = SS.load_scan(good)
+    check('scan hash: a well-formed scan unwraps to the scan itself',
+          live['title'] == 'T' and live['body'] == ['abc123abc123abc1'], str(live)[:80])
+
+    # ONE CHARACTER, the shape a hand transcription actually fails in.
+    bad = os.path.join(tmp, 'scan-bad.json')
+    mangled = inner.replace('abc123abc123abc1', 'abc123abc123abc2')
+    open(bad, 'w').write(json.dumps({'scanVersion': 2, 'sha256': digest, 'scan': mangled}))
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            SS.load_scan(bad)
+        rc = 0
+    except SystemExit as e:
+        rc = e.code
+    check('scan hash: one altered character is REFUSED, and named as transcription',
+          rc == 8 and 'TRANSCRIPTION' in buf.getvalue(), f'rc={rc} {buf.getvalue()[:90]}')
+    check('scan hash: and the refusal prints both digests, so the slip is findable',
+          digest in buf.getvalue()
+          and hashlib.sha256(mangled.encode()).hexdigest() in buf.getvalue())
+
+    # A bare pre-2026-09-14 scan still loads, and SAYS it cannot be checked — a skip that
+    # announces itself, never a silence.
+    old = os.path.join(tmp, 'scan-old.json')
+    open(old, 'w').write(inner)
+    buf2 = io.StringIO()
+    with contextlib.redirect_stdout(buf2):
+        live2 = SS.load_scan(old)
+    check('scan hash: a bare older scan still loads', live2['title'] == 'T')
+    check('scan hash: and says out loud that it cannot be checked',
+          'cannot be checked' in buf2.getvalue(), buf2.getvalue()[:90])
+
+
 def unit_rehash(tmp):
     """`rehash` writes the MANIFEST and nothing else — and a row may carry several hashes.
 
@@ -5445,6 +5504,20 @@ def engine_suite(tmp):
                 except Exception as e:                            # noqa: BLE001
                     failures.append(f'{p} [scan]: unparseable output ({e})')
                     continue
+                # The scan hashes its own output (2026-09-14), so what comes back is
+                # {scanVersion, sha256, scan}. Unwrap it HERE and check the digest — this
+                # corpus run over 45 pieces is the widest exercise the self-hash gets, and
+                # a wrapper the suite merely tolerated would prove nothing about it.
+                if isinstance(live, dict) and 'scan' in live and 'sha256' in live:
+                    got = hashlib.sha256(live['scan'].encode('utf-8')).hexdigest()
+                    if got != live['sha256']:
+                        failures.append(f'{p} [scan]: the scan does not hash to the digest '
+                                        f'it carries')
+                        continue
+                    live = json.loads(live['scan'])
+                else:
+                    failures.append(f'{p} [scan]: the scan carries no self-hash')
+                    continue
                 st = draft_state(d)
                 want_t = ([H(t) for t in st['body']], [H(t) for t in st['fns']])
                 want_m = ([HM(r) for r in st['bodyMarks']], [HM(r) for r in st['fnsMarks']])
@@ -5676,6 +5749,7 @@ def main():
         unit_commonmark(tmp)
         unit_references(tmp)
         unit_canons(tmp)
+        unit_scan_hash(tmp)
         unit_rehash(tmp)
         unit_shelf(tmp)
         unit_reference_add(tmp)
