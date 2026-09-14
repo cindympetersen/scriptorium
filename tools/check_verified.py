@@ -101,7 +101,14 @@ _BLOCKERS = [
 # deliberately no --force here, so it teaches them to write the clearance falsely instead.
 _CLEARED_CONTEXT = re.compile(
     r'(?:no|zero|non?e|nothing|never|no\s+longer)\s+(?:\w+\s+){0,3}(?:unverified|verify)'
-    r'|not\s+unverified'                                            # adjacent only, on purpose
+    r'|not\s+(?:\w+\s+){0,2}unverified'    # "not an unverified claim", "not really unverified".
+                                            # Safe to widen where the ADJACENT-ONLY rule was not: this
+                                            # clause can only ever match `not ... unverified`, and the
+                                            # case it had to protect -- "must not be published before we
+                                            # verify" -- contains `verify`, not `unverified`, so it
+                                            # cannot match here at any window. (2026-09-14: the narrow
+                                            # version blocked a scaffold sentence saying the remaining
+                                            # work is "an enhancement, not an unverified claim".)
     r'|(?:unverified|verify)\s+(?:\w+\s+){0,3}(?:remain|remains|outstanding|cleared|closed)'
     r'|all\s+(?:\w+\s+){0,3}(?:verified|checked)'
     r'|(?:anchors?|references?|loci|quotes?)\s+(?:\w+\s+){0,2}VERIFIED'
