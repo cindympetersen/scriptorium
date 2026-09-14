@@ -499,6 +499,7 @@ def unit_canons(tmp):
     different times — which is fine exactly as long as something checks that they agree.
     """
     import canons as C
+    import check_loci as L
     from refindex import KJV_BOOKS, HEADER_ALIASES
     cs = C.load()
     if not cs:
@@ -531,8 +532,37 @@ def unit_canons(tmp):
         check('canons: a numbered canon needs its own name to make a locus',
               bool(n.locus_re) and not n.locus_re.search(' 29:46 '),
               n.slug)
+    if 'gita' in by:
+        # The chapter-keyed canon. Everything here is a thing that went wrong while it
+        # was being built, and would go wrong silently if it came back.
+        g = by['gita']
+        check('canons: gita is chapter-keyed — this edition has no verse numbers',
+              g.verse_resolution is False)
+        check('canons: gita is indexed', g.has_index, str(g.index))
+        check('canons: a publication year is NOT a chapter',
+              g.loci("Arnold's *The Song Celestial*, 1885") == [],
+              'section_count is the numeric closed set')
+        check('canons: a chapter past the end is not a locus either',
+              g.loci('Gita XIX') == [] and g.loci('Gita 19') == [])
+        check('canons: roman numerals resolve, because Arnold prints them',
+              [k for k, _, _ in g.loci('Gita XII')] == [('gita', 12, 0)])
+        check('canons: an italicised locus resolves — the house sets titles that way',
+              [k for k, _, _ in g.loci('*Gita* 4.7')] == [('gita', 4, 0)])
+        check('canons: and the label keeps the verse that was CITED, not just what '
+              'was checked',
+              'no verses' in g.loci('*Gita* 4.7')[0][1], g.loci('*Gita* 4.7')[0][1])
+        idx = L.load(g.index)
+        check('canons: the gita index holds 18 chapters at verse 0',
+              sorted(idx) == [('gita', i, 0) for i in range(1, 19)], str(len(idx)))
+        joined = ' '.join(idx.values())
+        check('canons: the translator\'s notes are NOT in the index — they are '
+              'apparatus, not Arnold',
+              'repetitionary lines are here omitted' not in joined)
+        check('canons: no footnote markers survive to split a quotation',
+              '[FN#' not in joined)
+        check('canons: the colophon is kept — the corpus quotes it',
+              'Religion of Faith' in idx[('gita', 12, 0)])
     # The whole point of a record with no index: the gap is DECLARED, not absent.
-    import check_loci as L
     if any(not c.has_index for c in cs):
         found = L.unresolvable_loci("see Qur'an 29:46 and Gita 4.7 for this")
         check('canons: a locus in an unresolved canon is reported, not silent',

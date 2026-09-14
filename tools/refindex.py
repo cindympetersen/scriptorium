@@ -18,6 +18,9 @@ SCHEMES
   kjv-text           the same rows from a Gutenberg-style PLAIN TEXT KJV (eBook #10).
                      Prefer it: a text file has no pages, so it has no furniture.
   text               a .txt indexed by line-block.
+  gita-arnold        one row per CHAPTER of Arnold's *Song Celestial*, at verse 0.
+                     Named for the edition because that is what it parses — this one has
+                     NO verse numbers, and the canon record says so.
 
 RUNNING HEADERS AND FOOTERS ARE STRIPPED, AND A CONTAMINATED INDEX CANNOT PASS
   The furniture arrives mid-sentence ("of the stock of Israel, [of] the
@@ -236,6 +239,109 @@ def build_kjv_text(src, out):
     return f"{len(rows)} verses, {len(order)} books"
 
 
+ROMAN = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
+
+
+def roman(t):
+    n = 0
+    for i, ch in enumerate(t):
+        v = ROMAN[ch]
+        n += -v if i + 1 < len(t) and ROMAN[t[i + 1]] > v else v
+    return n
+
+
+def build_gita_arnold(src, out):
+    """Index Arnold's *Song Celestial* BY CHAPTER, because it has nothing finer.
+
+    THE VERSE NUMBERS ARE NOT THERE. The Gita is cited chapter.verse, and the plan of
+    record (framework/docs/CITATION-CHECKS.md) called Arnold "a clean Gutenberg text with
+    numbered verses" and the easiest canon to index. Opening the file settles it: Arnold's
+    is a free blank-verse rendering with speaker labels and eighteen roman-numbered
+    chapters, and not one verse number in 3,689 lines — the only digits in the file are the
+    imprint year and the Gutenberg licence's clause numbers.
+
+    So the honest index is one row per chapter, written at verse 0, and the canon record
+    carries `verse_resolution: false` so a reader is TOLD that 4.7 was checked against the
+    whole of chapter IV. A checker reporting MATCH at 4:7 against a source that cannot
+    address 4:7 would claim a precision it does not have, which is the failure this whole
+    apparatus exists to prevent.
+
+    THE COLOPHON IS PART OF THE CHAPTER. Arnold closes each one with "HERE ENDETH CHAPTER
+    XII. OF THE BHAGAVAD-GITA, Entitled 'Bhaktiyog,' Or 'The Book of the Religion of
+    Faith.'" — and the corpus quotes exactly that line as the tradition's own name for the
+    chapter of devotion. Cut it and a correct quotation reads as drift.
+
+    Named for the edition, not for the shape. A chapter-splitter sounds generic, but this
+    one knows Arnold's heading form, his colophon, his footnote markers and the Gutenberg
+    wrapper; the next canon will know its own. The reader generalizes, the builder does
+    not — the same finding that stopped `--scheme kjv` being renamed `verse`.
+    """
+    raw = open(src, encoding="utf-8", errors="replace").read()
+    m = re.search(r"\*\*\* ?START OF TH[EIS]+ PROJECT GUTENBERG[^\n]*\n", raw)
+    body = raw[m.end():] if m else raw
+    m = re.search(r"\*\*\* ?END OF TH[EIS]+ PROJECT GUTENBERG", body)
+    if m:
+        body = body[:m.start()]
+
+    # THE TRANSLATOR'S NOTES ARE NOT THE LAST CHAPTER. Arnold's twenty-one notes are
+    # collected at the end of the book, after the final colophon and under no heading —
+    # so a walk that stops only at the next CHAPTER line runs straight into them, and
+    # chapter XVIII came out 13,844 characters against a 5,282 median with "Some
+    # repetitionary lines are here omitted" inside it. A quotation could then MATCH
+    # chapter XVIII against Arnold's apparatus rather than against Arnold's verse, which
+    # is the same class of error as the KJV index's page furniture.
+    m = re.search(r"^\[FN#", body, re.M)
+    if m:
+        body = body[:m.start()]
+
+    head = re.compile(r"^\s*CHAPTER\s+([IVXL]+)\s*$")
+    chapters, cur, num = [], None, None
+    for line in body.splitlines():
+        h = head.match(line)
+        if h:
+            if cur is not None:
+                chapters.append((num, cur))
+            num, cur = roman(h.group(1)), []
+            continue
+        if cur is not None:
+            cur.append(line)
+    if cur is not None:
+        chapters.append((num, cur))
+
+    if len(chapters) != 18:
+        raise SystemExit(f"expected 18 chapters, found {len(chapters)}: "
+                         f"{[c[0] for c in chapters][:5]}… — not the expected edition")
+    seen = [c[0] for c in chapters]
+    if seen != list(range(1, 19)):
+        raise SystemExit(f"chapters out of order or missing: {seen}")
+
+    rows = []
+    for n, lines in chapters:
+        # The footnote MARKERS are the edition's apparatus, not Arnold's words, and they
+        # arrive mid-line ("Vivaswata,[FN#6] the Lord"). Left in, they split a quotation.
+        # NOT `\d+`: this transcription carries one typo, [FN#l6] with a lowercase L, and
+        # a digits-only pattern leaves exactly that one behind.
+        t = clean(scrub(re.sub(r"\[FN#[^\]]{1,8}\]", " ", " ".join(lines))))
+        if t:
+            rows.append((n, t))
+    # Proved, not assumed: no apparatus survived into a chapter, and no chapter is a
+    # wild outlier in length — the two shapes the failure above took.
+    leaked = [n for n, t in rows if "[FN#" in t]
+    if leaked:
+        raise SystemExit(f"footnote apparatus left in chapter(s) {leaked}")
+    lens = sorted(len(t) for _, t in rows)
+    med = lens[len(lens) // 2]
+    fat = [(n, len(t)) for n, t in rows if len(t) > 4 * med]
+    if fat:
+        raise SystemExit(f"chapter(s) far longer than the median {med}: {fat} — "
+                         f"something that is not verse was swept in")
+    with opener(out, "wt") as f:
+        for n, t in rows:
+            f.write(f"gita\t{n}\t0\t{t}\n")
+    return (f"{len(rows)} chapters, {lens[0]}..{lens[-1]} chars "
+            f"(median {med}), no verse divisions in this edition")
+
+
 def build_text(src, out, lines_per_block=40):
     """A .txt source indexed by line number.
 
@@ -344,6 +450,33 @@ def verify(path):
     dirty = [r for r in rows if FURNITURE_RE.search(r[-1])]
 
     books = {r[0] for r in rows}
+
+    # A CHAPTER-KEYED INDEX SHARES THE FOUR-COLUMN SHAPE and is not a KJV. Verse 0 is
+    # the marker: an edition with verse divisions never writes one, and one without
+    # writes nothing else. Verified against the canonical KJV it read as 66 missing
+    # books and 31,084 absent verses — a true statement about a question nobody asked,
+    # printed over the answer to the one that matters.
+    if all(r[2] == "0" for r in rows):
+        secs = sorted({(r[0], int(r[1])) for r in rows})
+        nums = [c for _, c in secs]
+        ok = nums == list(range(1, len(nums) + 1)) and len(secs) == len(rows)
+        print(f"chapter index: {len(rows)} chapter(s) of {sorted(books)}, "
+              f"{nums[0] if nums else '-'}..{nums[-1] if nums else '-'}, "
+              f"no verse divisions")
+        if dirty:
+            print(f"  PAGE FURNITURE IN {len(dirty)} ROW(S), e.g. {dirty[0][-1][:80]!r}")
+            ok = False
+        if not ok:
+            print("  CHAPTERS NOT A COMPLETE RUN FROM 1, or duplicated — a lookup would "
+                  "answer for the wrong chapter")
+        short = [r for r in rows if len(r[3]) < 200]
+        if short:
+            print(f"  SUSPICIOUSLY SHORT CHAPTER(S): "
+                  f"{[(r[1], len(r[3])) for r in short]}")
+            ok = False
+        print("  OK" if ok else "  NOT USABLE AS A CHECKER")
+        return 0 if ok else 4
+
     missing = [b for b in KJV_BOOKS if b not in books]
     extra = sorted(books - set(KJV_BOOKS))
     chapters = collections.defaultdict(set)
@@ -397,13 +530,15 @@ def main():
         print("--out is required"); sys.exit(1)
     if not os.path.exists(src):
         print(f"no such file: {src}"); sys.exit(1)
-    if scheme not in ("text", "kjv-text") and not src.lower().endswith(".pdf"):
+    if scheme not in ("text", "kjv-text", "gita-arnold") and not src.lower().endswith(".pdf"):
         print(f"scheme {scheme} reads a PDF; {os.path.basename(src)} is not one "
               f"(use --scheme text, or --scheme kjv-text for a Gutenberg KJV)"); sys.exit(1)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     got = (build_text(src, out) if scheme == "text" else
            build_kjv_text(src, out) if scheme == "kjv-text" else
-           build_kjv(src, out) if scheme == "kjv" else build_pages(src, out))
+           build_kjv(src, out) if scheme == "kjv" else
+           build_gita_arnold(src, out) if scheme == "gita-arnold" else
+           build_pages(src, out))
     print(f"{got} -> {out}")
     sys.exit(verify(out))
 

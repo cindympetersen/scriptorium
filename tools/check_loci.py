@@ -268,7 +268,7 @@ def house_changes(quote, canonical):
     return notes
 
 
-def check_unit(label, loci_text, span_text, idx, verbose):
+def check_unit(label, loci_text, span_text, idx, verbose, canon=None):
     """Check one unit of a draft: a body paragraph with the notes it carries, or a note.
 
     Extracted 2026-09-11 so the BODY is checked too. Until then this tool read
@@ -288,18 +288,33 @@ def check_unit(label, loci_text, span_text, idx, verbose):
     # advising exactly what it already said. That is a checker flagging correct
     # prose, which this file's own docstring names as the failure that trains a
     # reader to ignore it. Measured on false-light 2026-09-10.
-    keys, cited_to = [], {}
-    for lm in LOCUS_RE.finditer(loci_text):
-        book = ALIASES.get(lm.group(1), lm.group(1))
-        k = (book, int(lm.group(2)), int(lm.group(3)))
-        end = int(lm.group(4)) if lm.group(4) else k[2]
-        if k not in keys:
-            keys.append(k)
-        cited_to[k] = max(cited_to.get(k, end), end)
+    # THE CANON SHAPES THE LOCUS, not the King James. `canon.loci()` returns the key the
+    # index is looked up by, the label a reader sees, and the end of any cited range —
+    # which is how a chapter-keyed edition can be checked at all: its key is (slug, ch, 0)
+    # and its label still carries the verse the note gave, so the finding says both what
+    # was cited and what was checked. (2026-09-14, indexing Arnold's Gita, which has
+    # chapters and no verses.)
+    keys, cited_to, labels = [], {}, {}
+    if canon is not None:
+        for k, lab, end in canon.loci(loci_text):
+            keys.append(k); labels[k] = lab; cited_to[k] = end
+    else:
+        for lm in LOCUS_RE.finditer(loci_text):
+            book = ALIASES.get(lm.group(1), lm.group(1))
+            k = (book, int(lm.group(2)), int(lm.group(3)))
+            end = int(lm.group(4)) if lm.group(4) else k[2]
+            if k not in keys:
+                keys.append(k)
+            cited_to[k] = max(cited_to.get(k, end), end)
     if not keys:
         return checked, bad
 
+    verses = canon is None or canon.verse_resolution
+    src_label = "KJV  " if canon is None else f"{canon.slug:<5}"
+
     def shown(k):
+        if k in labels:
+            return labels[k]
         hi = cited_to.get(k, k[2])
         return f"{k[0]} {k[1]}:{k[2]}" + (f"-{hi}" if hi > k[2] else "")
 
@@ -309,11 +324,16 @@ def check_unit(label, loci_text, span_text, idx, verbose):
         parts = [idx[(b, c, i)] for i in range(v, hi + 1) if (b, c, i) in idx]
         return " ".join(parts) if parts else idx[k]
 
+    def not_in_index(k):
+        if verses:
+            return f"{k[0]} {k[1]}:{k[2]} does not exist in this edition"
+        return f"{shown(k)} — chapter {k[1]} is not in this edition"
+
     print(f"{label} " + " · ".join(shown(k) for k in keys))
     unknown = [k for k in keys if k not in idx]
     if unknown:
-        for b, c, v in unknown:
-            print(f"   NOT IN INDEX — {b} {c}:{v} does not exist in this edition")
+        for k in unknown:
+            print(f"   NOT IN INDEX — {not_in_index(k)}")
         bad += len(unknown)
     keys = [k for k in keys if k in idx]
     if not keys:
@@ -358,7 +378,7 @@ def check_unit(label, loci_text, span_text, idx, verbose):
             for n in house_changes(q, cited_text(key)):
                 print(f"     {n}")
             if verbose:
-                print(f"     KJV  : {cited_text(key)[:110]}")
+                print(f"     {src_label}: {cited_text(key)[:110]}")
             continue
 
         # The commonest real finding is not drift but an UNDER-CITED RANGE: the
@@ -369,7 +389,10 @@ def check_unit(label, loci_text, span_text, idx, verbose):
         # as 11:14, measured on false-light 2026-09-10).
         b, c, v = key
         span_lo = span_hi = None
-        for lo in range(v, max(0, v - 4) - 1, -1):
+        # Only meaningful where verses exist. A chapter-keyed edition has one row per
+        # chapter, so "the quotation runs into the next verse" is not a thing that can
+        # be true of it, and searching for it would only invent neighbouring chapters.
+        for lo in ([] if not verses else range(v, max(0, v - 4) - 1, -1)):
             for hi in range(v, v + 5):
                 if (b, c, lo) not in idx or (b, c, hi) not in idx or (lo, hi) == (v, v):
                     continue
@@ -385,14 +408,15 @@ def check_unit(label, loci_text, span_text, idx, verbose):
             print(f"   RANGE   the quotation covers {b} {rng}, but the note cites "
                   f"only {shown(key)[len(b) + 1:]} — cite {rng}")
         elif score < 0.6:
-            print(f"   SUSPECT only {int(score*100)}% of the span is in the verse — "
+            print(f"   SUSPECT only {int(score*100)}% of the span is in "
+                  f"{'the verse' if verses else 'the chapter'} — "
                   f"read it; a real drift looks like this")
             print(f"     draft: {' '.join(q.split())[:110]}")
-            print(f"     KJV  : {idx[key][:110]}")
+            print(f"     {src_label}: {idx[key][:110]}")
         else:
             print(f"   DRIFT   {detail}")
             print(f"     draft: {' '.join(q.split())[:110]}")
-            print(f"     KJV  : {idx[key][:110]}")
+            print(f"     {src_label}: {idx[key][:110]}")
     if skipped and not verbose:
         print(f"   ({skipped} italic span(s) skipped as commentary — -v to list)")
     return checked, bad
@@ -434,17 +458,33 @@ def main():
     # The body first, because that is what a reader meets. A paragraph's loci are the
     # ones its own markers cite: the house writes the quotation in the prose and the
     # citation in the note, so neither half is checkable without the other.
-    for i, para in enumerate(body_paragraphs(draft), 1):
-        marks = [m for m in re.findall(r"\[\^([\w-]+)\]", para) if m in notes]
-        if not marks:
+    # EVERY RESOLVABLE CANON, not just the first. The primary one keeps the index that
+    # was loaded above (so --index still works); each other canon with an index of its
+    # own is loaded and run in turn. A draft that cites the King James and the Gita is
+    # checked against both, and neither's loci are read with the other's pattern.
+    passes = [(_PRIMARY, idx)]
+    for c in _RESOLVABLE:
+        if _PRIMARY is not None and c.slug == _PRIMARY.slug:
             continue
-        c, b = check_unit(f"\u00b6{i} " + " ".join(f"[^{m}]" for m in marks),
-                          " ".join(notes[m] for m in marks), para, idx, verbose)
-        checked += c; bad += b
+        try:
+            passes.append((c, load(c.index)))
+        except Exception as e:                                     # noqa: BLE001
+            print(f"note: {c.slug} declares {os.path.relpath(c.index)} and it did not "
+                  f"load ({type(e).__name__}) — that canon is NOT being checked\n")
 
-    for name, note in footnotes(draft):
-        c, b = check_unit(f"[^{name}]", note, note, idx, verbose)
-        checked += c; bad += b
+    for canon, index in passes:
+        for i, para in enumerate(body_paragraphs(draft), 1):
+            marks = [m for m in re.findall(r"\[\^([\w-]+)\]", para) if m in notes]
+            if not marks:
+                continue
+            c, b = check_unit(f"\u00b6{i} " + " ".join(f"[^{m}]" for m in marks),
+                              " ".join(notes[m] for m in marks), para, index,
+                              verbose, canon)
+            checked += c; bad += b
+
+        for name, note in footnotes(draft):
+            c, b = check_unit(f"[^{name}]", note, note, index, verbose, canon)
+            checked += c; bad += b
 
     # NO CANON INDEX — a locus the desk KNOWS the canon of and cannot resolve. Reported
     # after the resolvable work, because it is a statement about the shelf rather than

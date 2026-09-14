@@ -63,8 +63,24 @@ from datetime import date
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 INDEX_DIR = ".index"
-LEGACY_INDEXES = {"kjv.tsv.gz"}          # owned by check_loci.py, documented in its own
-                                         # README section rather than as a manifest row
+
+# A CANON INDEX IS NOT A SOURCE, and the canon records are what say which files those are.
+# `.index/<stem>.tsv.gz` is the derived index of one held file, keyed by its name; a CANON
+# index is built by a named scheme for a named canon (kjv.tsv.gz, gita-arnold.tsv.gz) and
+# sits beside the sources, so `files_on_disk` would otherwise report it as a source with no
+# manifest row. This was hard-coded to {"kjv.tsv.gz"} while there was one of them; asking
+# the records means the next canon needs no edit here. (2026-09-14, indexing Arnold's Gita.)
+LEGACY_INDEXES = {"kjv.tsv.gz"}          # the floor, if the records cannot be read at all
+
+
+def canon_indexes(r=None):
+    try:
+        sys.path.insert(0, HERE)
+        import canons as C
+        named = {os.path.basename(c.index) for c in C.load(r or root()) if c.index}
+    except Exception:                                             # noqa: BLE001
+        named = set()
+    return LEGACY_INDEXES | named
 SOURCE_EXT = (".pdf", ".txt", ".md", ".html", ".htm", ".epub")
 
 
@@ -195,9 +211,10 @@ def files_on_disk(r=None):
     d = refdir(r)
     if not os.path.isdir(d):
         return []
+    skip = canon_indexes(r)
     return sorted(f for f in os.listdir(d)
                   if os.path.isfile(os.path.join(d, f))
-                  and f != "README.md" and f not in LEGACY_INDEXES
+                  and f != "README.md" and f not in skip
                   and not f.startswith("."))
 
 
