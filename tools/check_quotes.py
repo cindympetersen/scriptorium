@@ -66,6 +66,14 @@ SURNAME_STOP = {
     # Summa to every Ante-Nicene Fathers footnote. (Added 2026-09-13 with the title-regex
     # fix, which is what first let these reach the alias table.)
     "fathers", "province", "dominican", "society", "committee", "commission",
+    # HONORIFICS ARE NOT SURNAMES. "Radhanath Swami" put `swami` in the alias table, and
+    # a footnote citing "A.C. Bhaktivedanta Swami Prabhupada" — a 1974 conversation the
+    # desk does not hold — was therefore tied to Radhanath Swami's 2016 book and its
+    # quotation reported as DRIFT against a source it has nothing to do with. Same shape
+    # as "king" and "james" above: a word that names a person's station rather than the
+    # person. (Measured 2026-09-14 on krishna-is-not-christ [^4].)
+    "swami", "swamiji", "sri", "srila", "maharaj", "maharaja", "bhagavan",
+    "reverend", "bishop", "rabbi", "imam", "sheikh", "saint",
     "volume", "edition", "editions", "reprint", "translation", "translated", "revised",
     "expanded", "commemorative", "stories", "story", "essays", "lectures", "letters",
     "notes", "texts", "thing", "things", "world", "america", "american", "british",
