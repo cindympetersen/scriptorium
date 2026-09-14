@@ -188,3 +188,36 @@ rule is *every piece, unless the author says otherwise*, and the saying has to b
 
 The suite gates it (`corpus_prose`), so CI and the pre-push hook refuse a push that publishes a
 piece without the companion its publication requires.
+
+### Two checks, and only one of them used to know what a draft was
+
+`corpus_prose` asks whether a **published** piece has the companions its publication *requires*,
+and has always read liveness by the piece's own outlet key. `companions.py check` asks whether every
+companion a piece **declares** actually resolves — a `note.md` that is named and absent, a form or
+voice header that is missing, a talk whose back-pointer does not match. That second check read the
+whole corpus flat and asked nothing about stage.
+
+So a piece scaffolded an hour ago, declaring the Note it intends to write, failed it. **On a desk
+where several sessions work at once that turns CI red for everyone, over work that is going exactly
+as it should** — and a red run that everybody learns to expect is worse than no run. Measured
+2026-09-14: one session's fresh `the-coordinates-you-happen-to-have` was failing the suite for every
+other session on the desk.
+
+**The rule is `outlet_audit`'s rule, applied here: declaration is intent, publication is fact.** A
+check that exists to protect a reader FAILS for a text a reader can reach and REPORTS for one nobody
+can. The finding is not silenced — it is printed with the piece's stage, which is what a writer
+actually wants from it:
+
+```
+ok    corpus companions: every declared companion of a PUBLISHED piece resolves
+note  1 open on unpublished piece(s), which is a to-do rather than a fault:
+      the-coordinates-you-happen-to-have [composed]: note: no file note.md
+```
+
+**`corpus.stage(dir)` is the one place that decides**, and it says `live` / `composed` /
+`drafting`: live when a manifest names a reader URL on *any* outlet, drafting when there is no prose
+below the scaffold `---`, composed in between. `corpus.py` owns it for the same reason it owns
+`kind_of` — the corpus has one place that knows. `corpus_manifests` uses it too: a **live** post with
+no subtitle is the incident that check was written for and still fails; an unpublished piece that
+owes one is a note, because the guard that actually protects a reader is `md_to_substack`'s exit 6,
+which refuses to *compose* an empty header and has no override.

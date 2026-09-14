@@ -273,23 +273,32 @@ def problems_of(c, piece_dir):
 
 
 def check(pieces_dir):
-    """-> [(slug, problem)] across the corpus — both namespaces, since a talk carries the
-    back-pointer half of every companion pair."""
+    """-> [(slug, problem, stage)] across the corpus — both namespaces, since a talk
+    carries the back-pointer half of every companion pair.
+
+    THE STAGE RIDES ALONG BECAUSE THE CALLER HAS TO KNOW. A required Note missing from a
+    LIVE piece is a fault: the post is out and its companion is not. The same finding on a
+    piece somebody is still drafting is a to-do — it is missing because the piece is not
+    finished, which is what drafting looks like. The publish skill has always said this
+    gate "only fires once the piece is live"; it never did, and on a desk where several
+    sessions work at once it turned CI red for everyone over one unfinished scaffold.
+    `corpus.stage` defines the three words. (2026-09-14.)"""
     out = []
     root = os.path.dirname(os.path.abspath(pieces_dir))
     for slug, d, _kind in corpus.texts(root):
         if not os.path.isdir(d):
             continue
+        st = corpus.stage(d)
         if os.path.exists(os.path.join(d, LEGACY_NOTE)):
-            out.append((slug, f'legacy {LEGACY_NOTE}: move it into a `note` companion (note.md with a form/style header)'))
+            out.append((slug, f'legacy {LEGACY_NOTE}: move it into a `note` companion (note.md with a form/style header)', st))
         for c in companions(d):
-            out += [(slug, p) for p in problems_of(c, d)]
+            out += [(slug, p, st) for p in problems_of(c, d)]
         back = manifest_value(os.path.join(d, 'talk.yaml'), 'companion_of')
         if back:
             main = corpus.find(root, back, prefer='piece') or os.path.join(pieces_dir, back)
             tgt = manifest_block(os.path.join(main, 'publish.yaml'), 'companions').get('talk')
             if tgt != slug:
-                out.append((slug, f'talk.yaml says companion_of: {back}, but {back} does not declare it as its talk'))
+                out.append((slug, f'talk.yaml says companion_of: {back}, but {back} does not declare it as its talk', st))
     return out
 
 
@@ -311,8 +320,14 @@ def main(argv=None):
         return 0
 
     found = check(args.pieces)
-    for slug, p in found:
+    live = [(s_, p) for s_, p, st in found if st == 'live']
+    later = [(s_, p, st) for s_, p, st in found if st != 'live']
+    for slug, p in live:
         print(f'  {slug:36} {p}')
+    for slug, p, st in later:
+        print(f'  {slug:36} [{st}] {p}')
+    if later and not live:
+        print(f'\n{len(later)} open on unpublished piece(s) — a to-do, not a fault')
     n = sum(len(companions(os.path.join(args.pieces, s))) for s in os.listdir(args.pieces)
             if os.path.isdir(os.path.join(args.pieces, s)))
     print(f"{n} companion(s); {len(found)} problem(s)")

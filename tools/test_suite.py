@@ -1383,6 +1383,50 @@ def unit_live_urls(tmp):
 
 
 # ---------------------------------------------------------------- unit: companions
+def unit_stage(tmp):
+    """`corpus.stage` — the word the reader-protecting gates scope on.
+
+    Three states, and the boundary that matters is live / not-live: a gate that exists to
+    protect a reader fails for a text a reader can reach and reports for one nobody can.
+    Written 2026-09-14, after one session's freshly scaffolded piece turned CI red for
+    every other session on the desk.
+    """
+    print("\n-- corpus: how far along a text is ------------------------------------")
+    import corpus
+    root = os.path.join(tmp, 'stage-inst')
+    def mk(name, manifest='', draft=None):
+        d = os.path.join(root, 'pieces', name)
+        os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, 'publish.yaml'), 'w').write('title: T\nsubtitle: S\n' + manifest)
+        if draft is not None:
+            open(os.path.join(d, 'draft.md'), 'w').write(draft)
+        return d
+
+    scaffold = mk('scaffold')
+    check('stage: a piece with no draft is drafting', corpus.stage(scaffold) == 'drafting',
+          corpus.stage(scaffold))
+
+    header_only = mk('header-only', draft='*Draft — notes about the voice.*\n')
+    check('stage: a draft that is all scaffold header is still drafting',
+          corpus.stage(header_only) == 'drafting', corpus.stage(header_only))
+
+    written = mk('written', draft='*Draft — the note.*\n\n---\n\nThe first real sentence.\n')
+    check('stage: prose below the header makes it composed',
+          corpus.stage(written) == 'composed', corpus.stage(written))
+    check('stage: composed is NOT live — nobody can read it yet', not corpus.live(written))
+
+    # Each outlet has its own manifest key, and any one of them means a reader can get it.
+    # Reading only `public_url` is how a whole second publication once sat outside the gates.
+    for key in ('public_url', 'site_url'):
+        live = mk('live-' + key, manifest=f'{key}: https://example.test/p/x\n',
+                  draft='*Draft.*\n\n---\n\nWords.\n')
+        check(f'stage: {key} means live', corpus.stage(live) == 'live', corpus.stage(live))
+
+    empty = mk('live-empty', manifest='public_url:\n', draft='*D.*\n\n---\n\nWords.\n')
+    check('stage: an EMPTY reader URL is not a reader URL',
+          corpus.stage(empty) == 'composed', corpus.stage(empty))
+
+
 def unit_companions(tmp):
     """A piece's companions resolve — role, form, voice, back-pointer — and the review page
     shows them beside the piece, with findings anchorable in a Note (2026-09-11)."""
@@ -1406,7 +1450,7 @@ def unit_companions(tmp):
     b = mk('b-talk', draft='*d*\n---\n## I. Start\n<!-- slide: Hi -->\n> Shown.\n\nSaid aloud here.\n',
            files={'talk.yaml': 'title: The Talk\nduration_min: 5\n',
                   'README.md': '# The Talk\n**Style:** [plain-talk](../../framework/styles/plain-talk/style.md)\n'})
-    probs = [p for _s, p in cp.check(pieces)]
+    probs = [p for _s, p, _st in cp.check(pieces)]
     check('companions: a talk that does not point back at its essay is refused',
           any('companion_of' in p for p in probs), str(probs))
     open(os.path.join(b, 'talk.yaml'), 'a').write('companion_of: a-essay\n')
@@ -1415,12 +1459,12 @@ def unit_companions(tmp):
           cp.paragraphs(cp.companion(a, 'note')) == [['line one', 'line two'], ['line three']])
     open(os.path.join(a, 'note.md'), 'w').write(poem.replace('v-poem', 'plain-note'))
     check('companions: a voice pointed at a form it does not write is refused',
-          any('writes' in p for _s, p in cp.check(pieces)))
+          any('writes' in p for _s, p, _st in cp.check(pieces)))
     open(os.path.join(a, 'note.md'), 'w').write(poem)
     legacy = os.path.join(tmp, 'compdesk-legacy', 'pieces')          # built apart, never deleted
     os.makedirs(os.path.join(legacy, 'old-piece'))
     open(os.path.join(legacy, 'old-piece', 'substack-note.md'), 'w').write('old\n')
-    check('companions: a legacy substack-note.md is refused', any('legacy' in p for _s, p in cp.check(legacy)))
+    check('companions: a legacy substack-note.md is refused', any('legacy' in p for _s, p, _st in cp.check(legacy)))
 
     h = mk('c-headingless', 'captions:\n  assets/none.png: A caption.\n',
            draft='*s*\n---\n\n![A dog on a quilt](assets/none.png)\n\nThe body.\n')
@@ -1521,7 +1565,12 @@ def unit_corpus(tmp):
     open(os.path.join(other, 'talk.yaml'), 'a').write('companion_of: same-name\n')
     probs = cp.check(os.path.join(root, 'pieces'))
     check('companions: a talk claiming an essay that does not claim it back is caught',
-          any('companion_of' in p for _s, p in probs), str(probs))
+          any('companion_of' in p for _s, p, _st in probs), str(probs))
+    # Every finding carries the stage the caller scopes on, and a scratch piece with no
+    # reader URL is never 'live' — which is what keeps an unfinished piece out of the gate.
+    check('companions: every finding says what stage its piece is at',
+          all(len(x) == 3 and x[2] in ('live', 'composed', 'drafting') for x in probs)
+          and not any(x[2] == 'live' for x in probs), str(probs))
 
 
 def unit_schedule(tmp):
@@ -4829,10 +4878,11 @@ def corpus_manifests():
     (The online half is `substack_verify.py --archive`, which reads the reader's list.)
     """
     print("\n-- corpus: composed pieces carry a title and a subtitle -------------")
+    import corpus
     pieces_dir = PIECES
     if not os.path.isdir(pieces_dir):
         skip('manifests', f'no corpus at {pieces_dir}'); return
-    bad, unsettled, captioned, n = [], [], [], 0
+    bad, pending, unsettled, captioned, n = [], [], [], [], 0
     for p in sorted(os.listdir(pieces_dir)):
         d = os.path.join(pieces_dir, p)
         if not os.path.isfile(os.path.join(d, 'publish.yaml')):
@@ -4840,13 +4890,22 @@ def corpus_manifests():
         n += 1
         errs, warns = manifest_gate(d)
         if errs:
-            bad.append(f'{p}: ' + '; '.join(errs))
+            # A LIVE post with no subtitle is the incident this check was written for
+            # (one sat that way 2026-08-05 -> 2026-09-03). The same finding on a piece
+            # nobody can read yet is a to-do: it has no subtitle because it has no words.
+            # Reported either way; only the live one fails. The guard that actually
+            # protects a reader is md_to_substack's exit 6, which refuses to COMPOSE a
+            # piece with an empty header and has no override. (2026-09-14, corpus.stage.)
+            (bad if corpus.live(d) else pending).append(f'{p}: ' + '; '.join(errs))
         head = [w for w in warns if not w.startswith('cover_caption')]
         if head and live_url(read_manifest(os.path.join(d, 'publish.yaml'))):
             unsettled.append(p)
         if any(w.startswith('cover_caption') for w in warns):
             captioned.append(p)
     check(f'all {n} composed pieces carry a title and a subtitle', not bad, '; '.join(bad[:4]))
+    if pending:
+        print(f"  note  {len(pending)} unpublished piece(s) still owe a header line: "
+              + '; '.join(pending[:4]) + "  (md_to_substack refuses to compose without it)")
     if unsettled:
         print(f"  note  live but the manifest still marks the header unsettled: {', '.join(unsettled)}"
               "  (clear the comment once the author has signed off)")
@@ -4882,12 +4941,25 @@ def corpus_caption_spec():
 
 
 def corpus_companions():
-    """Every companion the corpus declares resolves — `companions.py check` (2026-09-11)."""
+    """Every companion a PUBLISHED piece declares resolves — `companions.py check`.
+
+    Scoped to live pieces on 2026-09-14. A required Note missing from a live piece is a
+    fault; the same finding on a piece being drafted is a to-do, and failing on it turns
+    CI red for every session over one unfinished scaffold. The publish skill has always
+    described this gate as firing "once the piece is live" — it never did. Reported, not
+    silenced: the unpublished ones are printed with their stage. (corpus.stage.)
+    """
     print("\n-- corpus: companions resolve -----------------------------------------")
     import companions as cp
     found = cp.check(PIECES)
-    check('corpus companions: every declared companion resolves (role, form, voice, back-pointer)',
-          not found, '; '.join(f'{s}: {p}' for s, p in found[:4]))
+    live = [(s, p) for s, p, st in found if st == 'live']
+    later = [(s, p, st) for s, p, st in found if st != 'live']
+    check('corpus companions: every declared companion of a PUBLISHED piece resolves '
+          '(role, form, voice, back-pointer)',
+          not live, '; '.join(f'{s}: {p}' for s, p in live[:4]))
+    if later:
+        print(f"  note  {len(later)} open on unpublished piece(s), which is a to-do rather "
+              f"than a fault: " + '; '.join(f'{s} [{st}]: {p}' for s, p, st in later[:4]))
 
 
 def corpus_voice_privacy():
@@ -5494,6 +5566,7 @@ def main():
         unit_outlet_urls(tmp)
         unit_live_urls(tmp)
         unit_outlet_reverse(tmp)
+        unit_stage(tmp)
         unit_companions(tmp)
         unit_cli_dispatch()
         unit_piece_resolution(tmp)

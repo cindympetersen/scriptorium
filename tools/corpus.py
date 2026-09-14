@@ -32,6 +32,7 @@ second lock would mostly be a way to hold half of it.
 """
 
 import os
+import re
 
 PIECES = 'pieces'
 TALKS = 'talks'
@@ -107,3 +108,76 @@ def rel(root, text_dir):
 
 def slug_of(text_dir):
     return os.path.basename(os.path.abspath(text_dir).rstrip(os.sep))
+
+
+# ---------------------------------------------------------------- stage
+
+# WHICH MANIFEST KEYS MEAN "A READER CAN GET THIS". One per outlet, because each outlet
+# has its own (`manifest_url_key` in outlets.yaml) — reading only `public_url` is how a
+# whole second publication once sat outside every corpus gate.
+LIVE_KEYS = ('public_url', 'site_url', 'linkedin_url', 'post_url')
+
+
+def _manifest_text(text_dir):
+    for name in ('publish.yaml', 'talk.yaml'):
+        p = os.path.join(text_dir, name)
+        if os.path.exists(p):
+            with open(p, encoding='utf-8') as f:
+                return f.read()
+    return ''
+
+
+def has_body(text_dir):
+    """Does this text have prose yet?
+
+    Everything above the first `---` is the desk's scaffold note, which a converter
+    discards — so a draft.md that is all header is a file, not a draft.
+    """
+    p = os.path.join(text_dir, 'draft.md')
+    if not os.path.exists(p):
+        return False
+    with open(p, encoding='utf-8') as f:
+        raw = f.read()
+    # NO `---` AT ALL MEANS NO BODY, not "the whole file is body". Every converter on this
+    # desk refuses a draft with no `---` rather than guessing where the scaffold ends — so a
+    # file without one cannot be composed, and calling it composed would be the one reading
+    # that makes a gate fire on a piece nobody could publish anyway.
+    if '\n---\n' not in raw:
+        return False
+    return bool(raw.split('\n---\n', 1)[-1].strip())
+
+
+def stage(text_dir):
+    """'live' | 'composed' | 'drafting' — how far along a text is.
+
+    WHY THE CORPUS GATES NEED THIS, and it is not a nicety. Several corpus-wide checks
+    exist to protect READERS: a post must have a subtitle, a published piece must carry
+    the companions its publication requires. Applied to a piece somebody scaffolded
+    twenty minutes ago they say something true and useless — it has no subtitle yet
+    because it has no words yet — and on a desk where several sessions work at once that
+    turns CI red for everyone, over work that is going exactly as it should.
+
+    A red run that everybody learns to expect is worse than no run. So the rule is the
+    one `outlet_audit` already uses for outlets: **declaration is intent, publication is
+    fact.** A reader-protecting check FAILS for a text a reader can reach and REPORTS for
+    one nobody can, and the report is not silence — it names the piece and what it still
+    owes, which is what a writer actually wants from it.
+
+      live      a manifest names a reader URL on some outlet
+      composed  it has prose, and no reader can get it yet
+      drafting  no prose below the scaffold header: an outline, notes, a title
+
+    Nothing here weakens the guard that matters. `md_to_substack` still refuses to
+    compose a piece with no subtitle (exit 6, no override), and that refusal is what
+    stands between a scaffold and a live post with an empty header.
+    """
+    man = _manifest_text(text_dir)
+    for k in LIVE_KEYS:
+        m = re.search(rf'^{k}:\s*(\S+)', man, re.M)
+        if m and m.group(1) not in ('', '~', 'null'):
+            return 'live'
+    return 'composed' if has_body(text_dir) else 'drafting'
+
+
+def live(text_dir):
+    return stage(text_dir) == 'live'
