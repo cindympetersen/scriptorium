@@ -259,11 +259,35 @@ house avoids elsewhere, and a lingering alias is the name a future session will 
    al-Ikhlas — the surah is the unit — and keying that on an ayah the index cannot hold
    answered *"112:0 does not exist in this edition"*, which is true and useless. It now
    keys on the first verse and ranges to the last, and says so: *Qur'an 112 — whole, 1–4*.
-7. ⬜ **A second Gita canon for verse resolution.** Telang's prose Gita (*Sacred Books of
-   the East* vol. VIII, 1882) is public domain and numbered. It belongs **beside** Arnold,
-   not instead of him: the corpus quotes Arnold's wording, and a canon record describes an
-   edition rather than a work. The Qur'an is now the precedent — two files of one
-   translation, one for the words and one for the addressing.
+7. ❌ **A second Gita canon for verse resolution — DROPPED 2026-09-14, the premise was
+   false.** This item said Telang's prose Gita (*Sacred Books of the East* vol. VIII, 1882)
+   "is public domain and **numbered**." It is public domain. It is not numbered.
+
+   Measured on two Internet Archive scans of it (`bhagavadgtwi00tela` 1882 and
+   `bhagavadgtwithsa00tela` 1908): across 260,000 characters of translation body, **zero**
+   line-initial verse numbers and **zero** parenthesised ones, against the Gita's 700
+   verses. Telang's translation is continuous prose with speaker labels — *"Sañjaya said:"*,
+   *"Arjuna said:"* — exactly the shape Arnold's verse is. The stanza numbers live in his
+   introduction's cross-references, in the footnotes, and in the **running heads**
+   (`CHAPTER I, 44.`), which give the last stanza on each page and so bound a verse to a
+   page rather than locating it.
+
+   So a Telang canon would be `verse_resolution: false` — **which is what the desk already
+   has in Arnold**, and a second chapter-keyed Gita buys nothing. Worse, two canons sharing
+   the prefix `Gita` would both claim `Gita 4.7`, and since the corpus quotes **Arnold**
+   (named 4 times, *Song Celestial* 3 times, Telang 0), every Arnold quotation would report
+   drift against Telang's different prose. Adding it would have made the checker noisier and
+   no more able.
+
+   **The rule that applies is the house's own: add structure only when it is used.** No
+   piece cites the Gita by verse; the one locus in the corpus is `4.7–8`, which Arnold
+   already resolves at chapter level. If a piece ever needs verse resolution, the work is to
+   find an edition that actually prints verse numbers — and to **open it before writing the
+   plan down**.
+
+   **That is twice.** The Arnold entry above was also planned on a claim about a text's
+   structure made without opening the file, and corrected the same way. Two for two: a plan
+   that names a source's shape is a claim, and it is checkable in about a minute.
 8. ✅ **`quoted_spans` reads quotation marks too** (2026-09-14), and a **book-implied
    locus** with it. Corpus before → after: quotations checked **439 → 510**, MATCH
    **425 → 495**, *"locus only, no quotation to check"* **227 → 181**. Exactly **two new
