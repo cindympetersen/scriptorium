@@ -232,19 +232,38 @@ house avoids elsewhere, and a lingering alias is the name a future session will 
    `NOT HELD`: an unverifiable citation is a failure, not a note.
 5. ✅ **The widened citation signal**, built from the records and deliberately only from
    the canons `check_loci` *cannot* resolve — a King James locus is `check_loci`'s to own.
-6. 🟡 **Indexes per canon.** **Arnold's Gita is built (2026-09-14) — by CHAPTER**, because
-   this edition has no verse numbers and none can be derived from it. The plan called it "a
-   clean Gutenberg text with numbered verses"; it is the first half and not the second, and
-   that was asserted without opening the file. The canon record carries
-   `verse_resolution: false` and the finding says which chapter was checked. Building it
-   also produced `section_count` — the numeric form of the KJV's closed section list, after
-   *"Sir Edwin Arnold's \*The Song Celestial\*, 1885"* parsed as chapter 1885 — and a
-   builder that refuses to write an index containing the translator's apparatus.
-   **Pickthall remains unbuilt**; it is the hard case and may need page images.
+6. ✅ **Indexes per canon — all three canons are indexed** (2026-09-14). Arnold's Gita is
+   indexed **by chapter**, because that edition has no verse numbers and none can be
+   derived; the plan called it "a clean Gutenberg text with numbered verses" and that was
+   asserted without opening the file. Pickthall is indexed **by ayah — but not from the
+   scan the desk held.** That scan's OCR cannot address a verse: **5,269 of the Qur'an's
+   6,236 ayah markers survived, the numbering breaks mid-surah 614 times, only 79 of 114
+   surah openings can be found**, and the prose degrades past reading in places. An index
+   built from it would resolve a locus to the **wrong ayah**, and a reader of that MATCH
+   could not tell it from a right one.
+
+   **So the shelf holds two Pickthalls, and each does the job it can.** The scan carries
+   the page images and the wording, which is what `check_quotes` reads; a verse-numbered
+   Tanzil file carries the addressing, which is what `check_loci` reads. They are checked
+   **against each other** rather than assumed to agree: 400 verses sampled from the Tanzil
+   file were sought verbatim in the scan's own index and **85.9% were found** — the same
+   rate at which the scan's markers survived, which is what makes the disagreements OCR
+   damage rather than a different translation.
+
+   **The Qur'an index is the one that is not committed.** Tanzil's terms (read from their
+   page, not recalled) are non-commercial use only and no redistribution; Pickthall's 1930
+   translation is US public domain but that *file* is Tanzil's, so it and its index are
+   gitignored, and a fresh clone rebuilds with `--scheme quran-tanzil`.
+
+   **A whole-section citation is a real citation.** The house writes `Qur'an 112` for
+   al-Ikhlas — the surah is the unit — and keying that on an ayah the index cannot hold
+   answered *"112:0 does not exist in this edition"*, which is true and useless. It now
+   keys on the first verse and ranges to the last, and says so: *Qur'an 112 — whole, 1–4*.
 7. ⬜ **A second Gita canon for verse resolution.** Telang's prose Gita (*Sacred Books of
    the East* vol. VIII, 1882) is public domain and numbered. It belongs **beside** Arnold,
    not instead of him: the corpus quotes Arnold's wording, and a canon record describes an
-   edition rather than a work.
+   edition rather than a work. The Qur'an is now the precedent — two files of one
+   translation, one for the words and one for the addressing.
 8. ✅ **`quoted_spans` reads quotation marks too** (2026-09-14), and a **book-implied
    locus** with it. Corpus before → after: quotations checked **439 → 510**, MATCH
    **425 → 495**, *"locus only, no quotation to check"* **227 → 181**. Exactly **two new
@@ -272,10 +291,11 @@ this week that note produced no finding of any kind.** It now quotes Arnold, and
 checkers MATCH it. That is this document's argument in one footnote: the apparatus was
 correct, and two blind spots kept it from ever running.
 
-**Standing today: ten Qur'an loci across *Jealous of a Calf* and *The Author Is Not a
-Character* still resolve to nothing** — Pickthall is the one canon left unindexed, and it is
-the hard one. The Gita side is indexed and both its pieces now check: *False Light*'s chapter
-XII claim resolves uniquely, and *Krishna Is Not Christ* rests on Arnold.
+**Standing today: every canon the desk declares is indexed, and `NO CANON INDEX` is 0.**
+The ten Qur'an loci across *Jealous of a Calf* and *The Author Is Not a Character* all
+resolve and match. Corpus-wide, quotations checked went **510 → 527** and problems **25 →
+16** on the day Pickthall landed. *False Light*'s chapter XII claim resolves uniquely, and
+*Krishna Is Not Christ* rests on Arnold.
 
 ## What this does not do
 

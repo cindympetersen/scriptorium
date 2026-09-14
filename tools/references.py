@@ -196,7 +196,12 @@ def rows(r=None):
             if not line.startswith("|"):
                 in_table = False
                 continue
-            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            # SPLIT ON UNESCAPED PIPES ONLY. `add` escapes a `|` inside a cell as the
+            # markdown table escape `\|`; a parser that split on it anyway would undo the
+            # escaping and shift every cell after it — the same failure the escape exists
+            # to prevent, moved one step later.
+            cells = [c.strip().replace("\\|", "|")
+                     for c in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
             m = ROW_RE.match(line)
             name = None
             if m:
@@ -573,8 +578,16 @@ def cmd_add(argv):
              "republish this file. Gitignored."
              if restricted else
              "✅ Public domain / redistributable. Safe to quote and redistribute.")
-    row = (f"| [{name}]({name}) | {book} | {work} | {prov} | "
-           f"{date.today():%Y-%m-%d} | {redis} |\n")
+    # A PIPE IN A CELL SILENTLY DESTROYS THE ROW. The manifest is a markdown table, so a
+    # `|` anywhere in the work, the provenance or the note shifts every cell after it —
+    # and the failure is not a parse error, it is a row whose Book column now holds half a
+    # sentence. Measured 2026-09-14 adding the Tanzil Pickthall, whose provenance names its
+    # `surah|ayah|text` format: `check` reported the row as having NO DIGEST and NO
+    # REDISTRIBUTION VERDICT, both of which were present and in the wrong cells. Escaped,
+    # because the alternative is refusing text a writer legitimately wants to write.
+    esc = lambda t: t.replace("|", "\\|")
+    row = (f"| [{name}]({name}) | {esc(book)} | {esc(work)} | {esc(prov)} | "
+           f"{date.today():%Y-%m-%d} | {esc(redis)} |\n")
     _append_row(readme(r), row)
     print("manifest: row appended to references/README.md")
     if restricted:

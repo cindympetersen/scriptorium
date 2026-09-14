@@ -621,6 +621,34 @@ def unit_canons(tmp):
         check('loci: a bare ch:v with no preceding book name is not a locus',
               k.loci('a ratio of (15:28) and nothing else') == [])
 
+    if 'quran' in by:
+        # The canon that could NOT be built from the scan the desk holds, and the
+        # measurement is in refindex.build_quran_tanzil: 5,269 of 6,236 ayah markers
+        # survived that OCR, 614 interior gaps, 79 of 114 surah openings.
+        q = by['quran']
+        check('canons: quran is indexed and resolves verses', q.has_index and q.verse_resolution)
+        idx = L.load(q.index)
+        check('canons: the quran index holds 6,236 ayat in 114 surahs',
+              len(idx) == 6236 and len({k[1] for k in idx}) == 114,
+              f'{len(idx)} rows, {len({k[1] for k in idx})} surahs')
+        check('canons: every surah runs 1..n with no interior gap',
+              all(sorted(v for (c, ch, v) in idx if ch == n)
+                  == list(range(1, 1 + sum(1 for (c, ch, v) in idx if ch == n)))
+                  for n in (1, 2, 29, 112, 114)))
+        # A WHOLE-SECTION CITATION IS A REAL CITATION: the house cites al-Ikhlas as
+        # "Qur'an 112", and keying that on an ayah the index cannot hold answered
+        # "112:0 does not exist in this edition" — true, and useless.
+        whole = q.loci("Qur'an 112")
+        check('canons: a surah cited whole keys on its first verse and ranges to its last',
+              [x[0] for x in whole] == [('quran', 112, 1)] and whole[0][2] == 4,
+              str(whole))
+        check('canons: and its label says both what was cited and what was checked',
+              'whole' in whole[0][1] and '112' in whole[0][1], whole[0][1])
+        check('canons: an ayah-level locus keys on the ayah',
+              [x[0] for x in q.loci("Qur'an 29:46")] == [('quran', 29, 46)])
+        check('canons: surah 115 is not a locus — section_count is the closed set',
+              q.loci("Qur'an 115:1") == [])
+
     if 'gita' in by:
         # The chapter-keyed canon. Everything here is a thing that went wrong while it
         # was being built, and would go wrong silently if it came back.
@@ -722,6 +750,24 @@ def unit_reference_add(tmp):
           len(cat) == 1 and cat[0]['index'] and cat[0]['restricted'])
     _, stream, offsets = R.load_index(cat[0]['index'])
     check('references add: its text is searchable', 'sentence number 77' in stream)
+
+    # A PIPE IN A CELL WOULD SILENTLY SPLIT THE ROW — the manifest is a markdown table,
+    # so an unescaped `|` in the work or the provenance shifts every cell after it and the
+    # row's digest and verdict end up in the wrong columns. Not a parse error: a row that
+    # reads as missing the two things it plainly states. (2026-09-14, adding a source whose
+    # provenance names a pipe-separated format.)
+    src3 = os.path.join(tmp, 'piped-work.txt')
+    open(src3, 'w').write('a source whose provenance contains a pipe. ' * 20)
+    R.cmd_add([src3, '--book', 'tst', '--work', '*A Piped Work* — C (1900)',
+               '--edition', 'one line per row as a|b|c', '--public'])
+    piped = [x for x in R.rows(home) if x.get('file') == 'piped-work.txt']
+    check('references add: a pipe in a cell does not split the row', len(piped) == 1
+          and 'unparsed' not in piped[0] and piped[0].get('book') == 'tst',
+          str(piped))
+    check('references add: and the row still states its digest and its verdict',
+          piped and piped[0].get('digests') and piped[0].get('verdict_stated'),
+          str(piped[0].get('digests')) if piped else 'no row')
+
 
     # DENY BY DEFAULT: the folder's own .gitignore decides, and a public source needs an
     # allow line. The direction is the point — an unclassified file is ignored, so a

@@ -199,11 +199,24 @@ class Canon:
     def section(self, name):
         return self.aliases.get(name, name)
 
+    def last_verse(self, section, chapter):
+        """The highest verse this canon's index holds for that section, or 0.
+
+        A WHOLE-SECTION CITATION IS A REAL CITATION. `Qur'an 112` names al-Ikhlas, four
+        ayat, and the house cites it exactly that way — the surah is the unit. Keying such
+        a locus on a verse the index cannot hold answered "112:0 does not exist in this
+        edition", which is true and useless. Keyed on verse 1 and ranged to the last, the
+        quotation is checked against the whole surah, which is what the note claims.
+        """
+        self._has(section, 1)
+        return max((v for (sec, ch, v) in self._verses if sec == section and ch == chapter),
+                   default=0)
+
     def _has(self, section, chapter):
         """Does this canon's index hold that section and chapter? Unknown means yes —
         an unloadable index must not silently narrow what counts as a locus."""
         if getattr(self, "_chapters", None) is None:
-            self._chapters = set()
+            self._chapters, self._verses = set(), set()
             try:
                 import gzip
                 op = gzip.open if self.index.endswith(".gz") else open
@@ -212,8 +225,10 @@ class Canon:
                         parts = line.split("\t")
                         if len(parts) >= 3:
                             self._chapters.add((parts[0], int(parts[1])))
+                            if len(parts) >= 4:
+                                self._verses.add((parts[0], int(parts[1]), int(parts[2])))
             except Exception:                                      # noqa: BLE001
-                self._chapters = set()
+                self._chapters, self._verses = set(), set()
         return not self._chapters or (section, chapter) in self._chapters
 
     def _name_re(self):
@@ -268,8 +283,15 @@ class Canon:
                 v = int(g[2]) if len(g) > 2 and g[2] else 0
                 end = v
                 if self.verse_resolution:
-                    key = (self.slug, ch, v)
-                    label = f"{m.group(0)}"
+                    if v:
+                        key, label = (self.slug, ch, v), m.group(0)
+                    else:
+                        # No ayah given: the whole section, keyed on its first verse and
+                        # ranged to its last.
+                        end = self.last_verse(self.slug, ch)
+                        key = (self.slug, ch, 1)
+                        label = (f"{re.sub(r'[*_]+', '', m.group(0)).strip()} — whole, "
+                                 f"1–{end}" if end else m.group(0))
                 else:
                     key, end = (self.slug, ch, 0), 0
                     cited = re.sub(r"[*_]+", "", m.group(0)).strip()

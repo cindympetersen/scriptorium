@@ -18,6 +18,7 @@ SCHEMES
   kjv-text           the same rows from a Gutenberg-style PLAIN TEXT KJV (eBook #10).
                      Prefer it: a text file has no pages, so it has no furniture.
   text               a .txt indexed by line-block.
+  quran-tanzil       one row per AYAH of a Tanzil `surah|ayah|text` translation file.
   gita-arnold        one row per CHAPTER of Arnold's *Song Celestial*, at verse 0.
                      Named for the edition because that is what it parses — this one has
                      NO verse numbers, and the canon record says so.
@@ -237,6 +238,64 @@ def build_kjv_text(src, out):
         for book, c, v, t in rows:
             f.write(f"{book}\t{c}\t{v}\t{t}\n")
     return f"{len(rows)} verses, {len(order)} books"
+
+
+def build_quran_tanzil(src, out):
+    """Index a Tanzil translation file — `surah|ayah|text`, one ayah per line.
+
+    WHY NOT THE SCAN THE DESK ALREADY HELD. The shelf's Pickthall is an Internet Archive
+    DLI scan, and its OCR cannot address a verse. Measured 2026-09-14: **5,269 of the
+    Qur'an's 6,236 ayah markers survived**, the numbering breaks mid-surah **614 times**,
+    only **79 of 114** surah openings can be found, and the text itself degrades to
+    "not^then se^-is appointed for you night and" in places. An index built from that
+    would resolve a locus to the WRONG AYAH — which is worse than no index, because the
+    reader of a MATCH cannot tell a right answer from a confidently wrong one.
+
+    So the verse index is built from a file that carries the addressing, and the held scan
+    stays what it is: the page images and the wording, for `check_quotes`.
+
+    The two agree. 400 verses sampled from this file were sought verbatim in the scan's
+    own index and **85.9% were found** — the same rate at which the scan's ayah markers
+    survived, which is what makes the disagreements OCR damage rather than a different
+    translation. That check is the reason to trust the file, and it is cheap to repeat.
+
+    Named for the edition, like every other scheme here: this parses Tanzil's format, and
+    the next canon will bring its own.
+    """
+    rows, notes = [], 0
+    for line in open(src, encoding="utf-8"):
+        line = line.rstrip("\n")
+        if not line.strip():
+            continue
+        if line.lstrip().startswith("#"):
+            notes += 1
+            continue
+        parts = line.split("|", 2)
+        if len(parts) != 3 or not parts[0].strip().isdigit() or not parts[1].strip().isdigit():
+            raise SystemExit(f"not a Tanzil translation line: {line[:70]!r}")
+        s_, a_, t = int(parts[0]), int(parts[1]), clean(scrub(parts[2]))
+        if t:
+            rows.append((s_, a_, t))
+
+    # STRUCTURE PROVED, NOT ASSUMED — and proved from the file rather than from a
+    # remembered table of ayah counts. A surah's ayat must run 1..n with no interior gap,
+    # and the surahs themselves must run 1..114: that is checkable here, and a count
+    # recalled from memory is exactly what this whole apparatus exists to replace.
+    import collections
+    by = collections.OrderedDict()
+    for s_, a_, t in rows:
+        by.setdefault(s_, []).append(a_)
+    if sorted(by) != list(range(1, 115)):
+        missing = [n for n in range(1, 115) if n not in by]
+        raise SystemExit(f"expected surahs 1-114, found {len(by)} (missing {missing[:8]})")
+    for s_, ayat in by.items():
+        if ayat != list(range(1, len(ayat) + 1)):
+            holes = [x for x in range(1, max(ayat) + 1) if x not in ayat]
+            raise SystemExit(f"surah {s_}: ayat are not 1..n contiguous (missing {holes[:6]})")
+    with opener(out, "wt") as f:
+        for s_, a_, t in rows:
+            f.write(f"quran\t{s_}\t{a_}\t{t}\n")
+    return f"{len(rows)} ayat in {len(by)} surahs ({notes} comment line(s) skipped)"
 
 
 ROMAN = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
@@ -477,6 +536,36 @@ def verify(path):
         print("  OK" if ok else "  NOT USABLE AS A CHECKER")
         return 0 if ok else 4
 
+    # A FOUR-COLUMN INDEX IS NOT NECESSARILY A KJV, and checking one against the King
+    # James's 66 books says something true about a question nobody asked. The Gita's
+    # chapter index reported 66 missing books and 31,084 absent verses that way; the
+    # Qur'an's reported 24,866. The index carries its own section names — read them.
+    if not books <= set(KJV_BOOKS):
+        secs = collections.defaultdict(set)
+        for b_, c_, v_, _ in rows:
+            secs[(b_, int(c_))].add(int(v_))
+        nums = sorted({c for _, c in secs})
+        ok = True
+        print(f"verse index: {len(rows)} verse(s) in {len(secs)} section(s) of "
+              f"{sorted(books)}, {nums[0] if nums else '-'}..{nums[-1] if nums else '-'}")
+        if nums != list(range(1, len(nums) + 1)):
+            print(f"  SECTIONS ARE NOT A COMPLETE RUN FROM 1 — a lookup would answer for "
+                  f"the wrong one: {[n for n in range(1, (nums[-1] if nums else 0) + 1) if n not in nums][:8]}")
+            ok = False
+        holes = []
+        for (b_, c_), vs in sorted(secs.items()):
+            gap = [x for x in range(1, max(vs) + 1) if x not in vs]
+            if gap:
+                holes.append(f"{b_} {c_}: missing {gap[:5]}")
+        if holes:
+            print(f"  INTERIOR GAPS IN {len(holes)} SECTION(S), e.g. {holes[0]}")
+            ok = False
+        if dirty:
+            print(f"  PAGE FURNITURE IN {len(dirty)} ROW(S), e.g. {dirty[0][-1][:70]!r}")
+            ok = False
+        print("  OK" if ok else "  NOT USABLE AS A CHECKER")
+        return 0 if ok else 4
+
     missing = [b for b in KJV_BOOKS if b not in books]
     extra = sorted(books - set(KJV_BOOKS))
     chapters = collections.defaultdict(set)
@@ -530,7 +619,7 @@ def main():
         print("--out is required"); sys.exit(1)
     if not os.path.exists(src):
         print(f"no such file: {src}"); sys.exit(1)
-    if scheme not in ("text", "kjv-text", "gita-arnold") and not src.lower().endswith(".pdf"):
+    if scheme not in ("text", "kjv-text", "gita-arnold", "quran-tanzil") and not src.lower().endswith(".pdf"):
         print(f"scheme {scheme} reads a PDF; {os.path.basename(src)} is not one "
               f"(use --scheme text, or --scheme kjv-text for a Gutenberg KJV)"); sys.exit(1)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
@@ -538,6 +627,7 @@ def main():
            build_kjv_text(src, out) if scheme == "kjv-text" else
            build_kjv(src, out) if scheme == "kjv" else
            build_gita_arnold(src, out) if scheme == "gita-arnold" else
+           build_quran_tanzil(src, out) if scheme == "quran-tanzil" else
            build_pages(src, out))
     print(f"{got} -> {out}")
     sys.exit(verify(out))
