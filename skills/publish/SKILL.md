@@ -682,6 +682,32 @@ from `GET /api/v1/drafts/<id>`, which does carry it, and from the dialog — nev
    (below), which reads the **publication's** list rather than the repo's and is the only check
    that can see a post the desk never composed.
 
+0d-captions. **Caption gate — every figure the draft shows must carry a caption, and this
+   one is HARD at publish.**
+
+   ```
+   python3 framework/tools/check_captions.py pieces/<name>        # exit 3 = stop
+   ```
+
+   An instance can rule that a caption is a **default, not a per-figure choice**; this one did,
+   in 2026-09-11, and `check_captions.py` is what reads that rule. Alt text and a caption are two
+   different jobs: the alt is what a reader who cannot see the picture gets, the caption is what
+   the sighted skimmer gets, and it says what the figure **means** rather than what it shows. A
+   drafting pass that writes the alt and stops leaves the skimmer nothing.
+
+   **Why it is a gate and not a line in a style file: it already was a line in a style file.**
+   Measured 2026-09-14 — a piece was drafted, critiqued, gated nine ways, cleared, composed and
+   published **to three outlets** with three of its four figures carrying no caption. Every gate
+   was green the whole way, because none of them was looking, and a human caught it after it was
+   public on three hosts. Same shape as the pronoun and
+   britishism rules before they had sweeps: **a rule no sweep checks is a rule nobody enforces.**
+
+   Captions live in `publish.yaml` — `captions:` keyed by the path the draft gives each image,
+   `cover_caption:` for the hero — **never as an italic line under the image in `draft.md`**,
+   which publishes as an ordinary paragraph. `gates.py` runs this as a WARNING, because 22 pieces
+   that published before the rule existed still carry an uncaptioned hero and a gate that fails
+   the whole corpus on day one is a gate somebody switches off. Here it is a stop.
+
 0e. **Tags gate — a piece publishes with its tags, so ask if it has none.** Run
    `python3 framework/tools/tags.py show <slug>`. A piece with **no tags** warns rather than
    refuses (tags are not a correctness property of the post), but say so in chat and offer the
@@ -1121,6 +1147,14 @@ wrapped by `figureImage` with a `figcaption`, plus an `imagePlaceholder` used du
 - **The paste drops the alt**, so set it afterwards on the inner `inlineImage` — and only after
   asserting each figure sits before its own anchor paragraph, or a misplaced figure gets the right
   alt and looks correct.
+- **A LinkedIn figcaption saves ONE PER PAGE LOAD. Set one, Update, reload, repeat.**
+  Measured 2026-09-14 re-syncing four captions onto a live Article: setting all four in one pass
+  left the editor showing all four and **only one survived the save** — and it was the first one
+  written in that page's life, not the last. A second pass set three more, and again only the first
+  of them persisted. The editor's own read-back is NOT evidence here: the doc had all four every
+  time. **Verify on the public page, count the `publishing-image-block-caption` nodes, and expect
+  to do one load-set-Update cycle per figure.** Four captions cost four cycles.
+
 - **The announcing-post field in the publish dialog is a QUILL editor** (`.ql-editor`), not Tiptap.
   A synthetic paste leaves it empty. Focus it, select its contents, and
   `document.execCommand('insertText', false, text)`. Then **read it back and hash it against

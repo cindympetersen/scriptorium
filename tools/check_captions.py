@@ -2,10 +2,9 @@
 """check_captions.py — every figure a draft shows must carry a caption.
 
 WHY THIS EXISTS
-  The rule is the author's and it is a DEFAULT, not a preference (Eric, 2026-09-11:
-  *"the figure should have a caption. (and this should be the default behavior)"*).
-  It was written into `styles/essay/corrections.md` and into ALT-TEXT.md, and then
-  it lived there — as prose. No tool read it.
+  An instance can rule that a caption is a DEFAULT rather than a per-figure choice.
+  This desk did, in 2026-09-11, and wrote it into a style's corrections file and
+  into ALT-TEXT.md — where it lived, as prose. No tool read it.
 
   Measured 2026-09-14: *The Coordinates You Happen to Have* was drafted, critiqued,
   gated nine ways, cleared, composed and PUBLISHED TO ALL THREE OUTLETS with three
