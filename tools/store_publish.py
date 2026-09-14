@@ -299,6 +299,10 @@ def main():
                     help='say what would change and touch nothing')
     ap.add_argument('--prune', action='store_true',
                     help='also DELETE store objects the bundle does not contain')
+    ap.add_argument('--remove', action='append', metavar='SLUG', default=[],
+                    help='UNPUBLISH this slug: the bundle index is allowed to drop it, and its '
+                         'own objects are deleted. Repeatable. Nothing else is touched, which '
+                         'is what makes this different from --prune')
     ap.add_argument('--no-invalidate', action='store_true')
     ap.add_argument('--no-revalidate', action='store_true',
                     help='skip telling the sites; they catch up within their revalidate window')
@@ -343,6 +347,9 @@ def main():
             upload.append((key, path))
 
     stale = sorted(set(remote) - set(local))
+    # The objects that belong to a removed slug: its record and its images, and nothing else.
+    removed_keys = sorted(k for k in remote for slug in a.remove
+                          if k == f'pieces/{slug}.json' or k.startswith(f'images/{slug}/'))
 
     # index.json replaces the live list outright; refuse a bundle whose index would drop
     # entries that are live. --prune is the one flag that means "yes, remove things".
@@ -356,6 +363,22 @@ def main():
             die(1, f'cannot read the live index to check it — {e}')
         with open(local['index.json'], encoding='utf-8') as fh:
             lost = index_losses(live, json.load(fh))
+        # `--remove` is the deliberate unpublish. A corpus needs one: without it the only way
+        # to drop a piece was --prune, which deletes every object the bundle lacks, so removing
+        # one retired page meant rebuilding the whole corpus into a bundle and hoping. Here the
+        # ONLY losses allowed are the slugs named on the command line, and each one must
+        # actually be live — a typo cannot quietly authorise a different removal.
+        if lost and a.remove:
+            named = set(a.remove)
+            unnamed = [x for x in lost if x.split(' (')[0] not in named]
+            absent = sorted(named - {x.split(' (')[0] for x in lost})
+            if absent:
+                die(4, f"refusing: --remove named {', '.join(absent)}, which the live index does "
+                       f"not list. Removing something that is not there is a typo, not a removal.")
+            if unnamed:
+                die(4, f"refusing: this bundle would also drop {', '.join(unnamed[:8])}, which "
+                       f"--remove did not name. Name every removal explicitly.")
+            lost = []
         if lost:
             die(4, f"refusing: this bundle's index.json would UNPUBLISH {len(lost)} live "
                    f"entr{'y' if len(lost) == 1 else 'ies'} — {', '.join(lost[:8])}"
@@ -382,6 +405,11 @@ def main():
     print(f"store     s3://{bucket}  ->  {store.get('base_url', '(no base_url)')}")
     print(f"upload    {len(upload)}    unchanged {len(skip)}    "
           f"only in store {len(stale)}{' (will DELETE)' if a.prune else ''}")
+    if removed_keys:
+        print(f"remove    {', '.join(a.remove)} — {len(removed_keys)} object(s) DELETED, "
+              f"and dropped from the index")
+        for key in removed_keys:
+            print(f"  - {key}")
     for key, _p in upload[:40]:
         print(f"  + {key}   [{cache_control(key, cc)}]")
     if len(upload) > 40:
@@ -395,7 +423,7 @@ def main():
     if a.dry_run:
         print("\ndry run — nothing uploaded")
         return 0
-    if not upload and not (a.prune and stale):
+    if not upload and not (a.prune and stale) and not removed_keys:
         print("\nnothing to do")
         return 0
 
@@ -406,6 +434,11 @@ def main():
             extra['CacheControl'] = cache
         s3.upload_file(path, bucket, key, ExtraArgs=extra)
     print(f"\nuploaded {len(upload)}")
+
+    if removed_keys:
+        s3.delete_objects(Bucket=bucket,
+                          Delete={'Objects': [{'Key': k} for k in removed_keys]})
+        print(f"removed {len(removed_keys)} object(s) for {', '.join(a.remove)}")
 
     if a.prune and stale:
         for i in range(0, len(stale), 1000):
@@ -420,7 +453,9 @@ def main():
 
     # Invalidate exactly what moved. A wildcard costs the same as ten paths and blows
     # away image caching for no reason, so only reach for one when the list is long.
-    changed = [f'/{k}' for k, _ in upload] + [f'/{k}' for k in (stale if a.prune else [])]
+    changed = ([f'/{k}' for k, _ in upload]
+               + [f'/{k}' for k in (stale if a.prune else [])]
+               + [f'/{k}' for k in removed_keys])
     paths = changed if len(changed) <= 100 else ['/*']
     cf = session.client('cloudfront')
     inv = cf.create_invalidation(
