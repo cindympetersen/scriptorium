@@ -55,6 +55,29 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
   `post_url` present → **republish** (surgical re-sync), browser open on that **live post's
   editor** (`https://<pub>.substack.com/publish/post/<id>`). Either way the user is **logged
   in** — automation cannot enter credentials.
+- **Transport: the `window.name` CARRIER + synthetic paste is the default on BOTH surfaces
+  (2026-09-14). The real-⌘V clipboard path is a fallback, and it has a cost you must not pay by
+  accident: it RAISES THE BROWSER WINDOW.**
+
+  Eric, 2026-09-14: *"using the browser via the plugin brings it to the foreground, interrupting my
+  workflow, can we fix this in the toolkit?"* — and the interruption is not only rude, **it
+  corrupts the document.** Measured the same hour, composing *The Coordinates You Happen to Have*
+  in Claude in Chrome: `md_to_clipboard.py --paste` raised the window into the author's typing, and
+  **three characters of what he was typing — `fix` — landed as an unmarked text node at the head of
+  the post's first paragraph.** Nothing reported it. The converter does not emit `fix`; only the
+  fidelity digest's block-by-block comparison found it, and only because the digest was run before
+  the publish click. **A real ⌘V through System Events cannot be made quiet**: macOS delivers a real
+  keystroke to the frontmost app, so raising the window IS the mechanism, not a bug in the tool.
+  The fix is therefore to stop needing the keystroke.
+
+  **The carrier does not need it.** It is a synthetic `paste` ClipboardEvent on `.ProseMirror` —
+  no Clipboard API, no System Events, no focus, no raise — and the snippet reaches the page through
+  `window.name`, which survives a cross-origin navigation on any surface. Measured on the pane
+  2026-09-10 (digest-identical compose) and in **real Chrome** 2026-09-14, where the footnote pass,
+  the cover write and the tag write all went in this way with the payload's sha256 re-checked
+  **inside the page** before each execution. **Use `--paste` only where System Events is the only
+  way in, and say so in chat when you do.**
+
 - **Surface: the BUILT-IN BROWSER PANE is the default for BOTH a re-sync and a fresh compose — for
   the PRIMARY Substack outlet; every other Substack outlet opens in Claude in Chrome (below).**
   Measured 2026-09-10 (Eric's preference: *"if we can publish using the built in browser instead
@@ -718,7 +741,13 @@ satisfy the Clipboard API, so on real Chrome the click has to be a real one.
 > steps will be obeyed by the numbered steps.** When the default moves, grep the whole file for the
 > old one.
 
-1. **Take the pasteboard and paste in ONE process (the default since 2026-09-08):**
+1. **DEFAULT — carry the converter's snippet in and let it paste synthetically.** Generate with
+   `md_to_substack.py`, deliver with `pane_carry.py`, re-hash **in the page**, execute. Full recipe
+   in *Getting a snippet into the page* below; it works on the pane and in real Chrome alike, and
+   **it never raises the window.** Skip to step 2.
+
+   **FALLBACK — the pasteboard and a real ⌘V, which RAISES THE BROWSER WINDOW** (default from
+   2026-09-08 to 2026-09-14; see the Transport bullet for what that cost):
 
    ```
    python3 framework/tools/md_to_clipboard.py pieces/<name> --paste --expect-url publish/post/<id> --fn-b64 <fn.b64> --fn-out <fn.js>
@@ -756,8 +785,12 @@ satisfy the Clipboard API, so on real Chrome the click has to be a real one.
    the live doc holds FIRST** (see 0b-images / 0b-embeds); `clearContent` removes them, and an
    `undo` is a rescue, not a plan (measured 2026-09-07: a hero added in the composer was cleared
    before it was read; `undo` brought it back that time).
-3. **Body:** a **real click** into the body, then step 1's `--paste`. Formatting, links and dividers
-   arrive intact; footnote refs remain as `[[FNn]]` markers.
+3. **Body:** carry the converter's snippet in and execute it (step 1's default) — no click and no
+   window raise. On the `--paste` fallback only, a **real click** into the body first. Either way
+   formatting, links and dividers arrive intact and footnote refs remain as `[[FNn]]` markers.
+
+   **Then count the top nodes against the converter's own counts before going on.** That is what
+   catches a stray keystroke that arrived while the window was raised, and it is cheap.
    **Substack applies smart-quote input rules on paste** (`'`→`’`, `"`→`“ ”`), so the live text
    will differ from the draft at every apostrophe — that is expected, it is what the whole
    corpus published with, and step 6's digest must account for it rather than treat it as
@@ -948,14 +981,15 @@ satisfy the Clipboard API, so on real Chrome the click has to be a real one.
    with no profile id recorded now reports `UNREAD` with its pieces counted, rather than passing
    silently; `probe --outlet <name>` prints that outlet's own probe draft.
 
-### The JS-snippet path — the pane's default, and Chrome's fallback
+### The JS-snippet path — the DEFAULT on both surfaces (2026-09-14)
 
 `md_to_substack.py` emits a self-contained snippet that sets title and subtitle and pastes the
 body as a synthetic ProseMirror paste. **Deliver it with `pane_carry.py`, never by retyping it
 into an eval** — the transcription warning above is about *delivery*, and it is the whole of the
 objection to this path. Delivered by carrier it is digest-identical to the clipboard route
-(measured 2026-09-10) and it is the **default on the pane**. On Chrome it stays the fallback for
-when the pasteboard is unavailable. Verify with step 6 either way, without exception.
+(measured 2026-09-10) and it is now the **default on both surfaces** — on Chrome too, because the
+clipboard route's real ⌘V raises the author's window and a raised window takes their keystrokes
+into the document (Transport bullet, 2026-09-14). Verify with step 6 either way, without exception.
 
 1. **Convert:** `python3 framework/tools/md_to_substack.py pieces/<name> <out.js>`
 2. **Focus** the composer body (click into it).
@@ -970,8 +1004,21 @@ when the pasteboard is unavailable. Verify with step 6 either way, without excep
 
 Every JS path below (surgical repatch, structural repatch, the footnote pass) needs an
 80–125 KB generated snippet **inside the page**. The agent must never retype it: that is the
-transcription risk the whole transport chapter exists to remove. In **real Chrome** the clipboard
-does this. In the **built-in browser pane** use this, measured 2026-09-10 on two live posts.
+transcription risk the whole transport chapter exists to remove. Use this on **both** surfaces. It was written for the
+pane (measured 2026-09-10 on two live posts) and was used in real Chrome on 2026-09-14 for a
+footnote pass, a cover write and a tag write; the clipboard alternative is what raises the window.
+
+**A snippet that is a MODULE needs a module loader, not an injected `<script>`.** `substack_tags.py`
+(and anything else ending in a bare last-expression value with top-level `await`) will not run as a
+classic script: top-level `await` is a module-only feature, so the injected script throws or
+silently yields `undefined`. Import the carried text as a blob module and append ONE line to hand
+the value back — the carried bytes themselves stay untouched, so the hash you verified is still the
+code that ran:
+
+    const url = URL.createObjectURL(new Blob([payload.text + "\nwindow.__out = result;\n"],
+                                             {type: 'text/javascript'}));
+    await import(url); URL.revokeObjectURL(url);
+    return window.__out;
 
 **Every network route into the page is shut, and no response header opens one:**
 
@@ -1154,6 +1201,26 @@ rule that the author decides and this skill clicks.
 > Substack's edits into `draft.md` first, reports conflicts instead of picking a side, and
 > then calls the push below. Use this section directly only for a piece with **no**
 > Substack-side edits possible — in practice, one you just composed.
+
+**0-resync. Before you touch the first outlet, find out how many there are.**
+
+```
+python3 framework/tools/resync.py pieces/<name>        # exit 3 = an outlet is behind
+```
+
+**Publishing got this gate; re-syncing did not, and that was the hole** (Eric, 2026-09-14:
+*"our toolset should republish to all outlets. why was this missed?"*). Step 0-outlets runs
+`check_outlets` before a first publication precisely so the irreversible outlet is not the one
+you discover the problem after. A **correction** is the case where the outlets are *guaranteed*
+to disagree at the start, and nothing ran. `substack_repatch.py` and `substack_sync.py` contain
+no occurrence of `outlets` — they know one destination and cannot raise the existence of a
+second — so the fan-out lived only in the `substack-sync` skill's prose, which already cited its
+own measured precedent and did not stop the same failure recurring three days later.
+
+`resync.py` reads the piece's `outlets:` and **refuses to look like completion**: the summary
+reads *N of M outlets current* and the exit is 3 while any outlet is behind. Run it here, and
+again after the last carry — **exit 0 is the report.** A green `substack_verify` is not: it
+exits 0 on a true statement about one publication, which reads as a finished job.
 
 When a piece is **already published** and `draft.md` has since changed (a fixed quote, a
 pronoun-casing sweep, a reworded clause), don't recompose it from scratch — that would

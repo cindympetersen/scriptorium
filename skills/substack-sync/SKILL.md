@@ -149,9 +149,26 @@ Each browser step is one JS eval in the live post's editor.
    `python3 framework/tools/substack_sync.py seal pieces/<name> live-after.json`
    It refuses unless draft and live now agree, and records the new baseline. **Do not skip
    this** — an unsealed sync leaves the next one unable to tell which side moved.
-8. **Carry it to every other outlet the piece declares.** This loop moves Substack and
-   nothing else, and a correction is not live until every outlet in `publish.yaml`'s
-   `outlets:` has it. **Measured 2026-09-11:** *For the Love of Dogs* had its storm sentence
+8. **Carry it to every other outlet the piece declares — and START by asking how many there
+   are.** This loop moves Substack and nothing else, and a correction is not live until every
+   outlet in `publish.yaml`'s `outlets:` has it.
+
+   ```
+   python3 framework/tools/resync.py pieces/<name>        # exit 3 = an outlet is behind
+   ```
+
+   **Run it before you touch the first outlet and again after the last.** It reads `outlets:`,
+   checks each against the live page, and **refuses to look like completion** — the summary
+   always reads *N of M outlets current*, and the exit is 3 while any outlet is behind. That is
+   the whole point: the failure this step exists to prevent is not forgetting the rule, it is
+   *reporting done* after moving one outlet, which is what a green `substack_verify` invites,
+   since it exits 0 on a true statement about one publication. A Substack outlet is checked
+   through `substack_verify` (body, footnotes, marks, anchors); other outlets are compared on
+   body paragraphs only, and the tool prints that limit on every run rather than implying more.
+   An outlet a person has to publish is deferred with a reason —
+   `--defer <outlet> --reason "…"` — and the deferral **binds to the draft's sha256 and lapses
+   the moment the draft changes**, because a reason given for one version is not a reason for
+   the next. **Measured 2026-09-11:** *For the Love of Dogs* had its storm sentence
    corrected, re-synced, `substack_verify --fresh` MATCH, and was logged *live and verified* —
    while alignmentfellowship.org went on serving the old sentence until an audit happened to
    look, because the content store was never re-uploaded. Not a cache: the store object was five
@@ -165,10 +182,17 @@ Each browser step is one JS eval in the live post's editor.
      over. It is **pending** until they update it; say so rather than reporting it done.
 
    Then, after about a minute, from the instance root:
-   `python3 framework/tools/outlet_audit.py --content --outlet <outlet>` for each one, and read
-   this piece's row. **Report the correction as live only when `substack_verify` matched and
-   this piece is clean on every outlet it declares**; otherwise report per outlet — *Substack
-   confirmed; alignmentfellowship pending* — never one word for all of them.
+
+   ```
+   python3 framework/tools/resync.py pieces/<name>        # must exit 0
+   ```
+
+   **Exit 0 is the report.** Until it is, the correction is not live, whatever any single
+   outlet's check said. `outlet_audit.py --content --outlet <outlet>` is still the wider sweep
+   — it also runs the reverse direction from each outlet's sitemap, which resync does not — so
+   reach for it when auditing the corpus rather than finishing one piece. **Report per outlet
+   until they all agree** — *Substack confirmed; alignmentfellowship pending* — never one word
+   for all of them.
 
 ## First run (a piece published before sync existed)
 
