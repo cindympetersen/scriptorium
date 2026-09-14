@@ -190,9 +190,35 @@ def quoted_spans(text):
     that is exactly where a real drift would sit.
 
     Titles are removed outright first: a `[*Title*](url)` is a link, never a quote.
+
+    QUOTATION MARKS COUNT TOO, and leaving them out was a blind spot rather than a
+    policy. Measured 2026-09-14: **65 of 433 footnotes carrying a resolvable locus also
+    carried a double-quoted passage that no italic span covered**, and this function
+    never returned one — so `both-ends-of-the-leash [^subtil]`, whose note quotes twenty
+    verbatim words of Genesis 3:1 inside quotation marks, printed *"locus only, no
+    quotation to check."* The wording was right; nothing had checked it. Same
+    silence-shaped failure as the alias bug in `check_quotes`, in the other checker.
+
+    The threshold below is what makes this safe to widen: a span is only a candidate,
+    and one with almost nothing in common with the verse is still dropped as commentary.
+    Adding a second way to FIND a span does not add a second way to judge one.
+
+    Inner emphasis is flattened before a quoted span is taken, because the house marks a
+    foreign word inside a quotation (*dharma*) and an outer `"…"` would otherwise be
+    split into fragments at those asterisks.
     """
     text = re.sub(r"\[\*[^*]+\*\]\([^)]*\)", " ", text)
-    return [s for s in re.findall(r"\*([^*]{12,})\*", text)]
+    spans = re.findall(r"\*([^*]{12,})\*", text)
+    flat = re.sub(r"[*_]+", "", text)
+    spans += re.findall(r"[\u201c\"]([^\u201d\"]{12,})[\u201d\"]", flat)
+    # A passage that is both italicised and quoted must not be checked twice.
+    out, seen = [], set()
+    for sp in spans:
+        k = norm(sp)
+        if k and k not in seen:
+            seen.add(k)
+            out.append(sp)
+    return out
 
 
 def overlap(span, canon):

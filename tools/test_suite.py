@@ -532,6 +532,34 @@ def unit_canons(tmp):
         check('canons: a numbered canon needs its own name to make a locus',
               bool(n.locus_re) and not n.locus_re.search(' 29:46 '),
               n.slug)
+    if 'kjv' in by:
+        # QUOTATION MARKS AND THE BOOK-IMPLIED LOCUS. Both are things the house writes and
+        # the checker could not read; every case below is one that actually went wrong.
+        k = by['kjv']
+        check('spans: a double-quoted passage is a candidate, not just an italic one',
+              any('serpent was more subtil' in x for x in
+                  L.quoted_spans('the text says "Now the serpent was more subtil than any '
+                                 'beast of the field" and so on')))
+        check('spans: inner emphasis does not split an outer quotation',
+              any('decline of dharma' in x.replace('*', '') for x in
+                  L.quoted_spans('"Whenever there is a decline of *dharma* I manifest myself"')))
+        check('spans: a passage both italicised and quoted is offered once',
+              len(L.quoted_spans('*"the same words twice over here"*')) == 1)
+        check('loci: a parenthesised book-implied locus inherits its book',
+              [x[1] for x in k.loci('the father "came out" (Luke 15:25), and again (15:28)')]
+              == ['Luke 15:25', 'Luke 15:28'])
+        check('loci: it inherits from the nearest NAME, not the nearest locus',
+              'Luke 22:39' in [x[1] for x in k.loci(
+                  'John 18:10 has the ear. Luke sets the scene at the place (22:39-40)')],
+              'John has 21 chapters; inheriting the locus invented John 22:39')
+        check('loci: "the King James" is not the book of James',
+              [x[1] for x in k.loci('Matthew 5:21 (KJV). The King James has it. '
+                                    'The same gospel lists them (15:18-19).')]
+              == ['Matthew 5:21', 'Matthew 15:18'],
+              'the inherited book is validated against the index')
+        check('loci: a bare ch:v with no preceding book name is not a locus',
+              k.loci('a ratio of (15:28) and nothing else') == [])
+
     if 'gita' in by:
         # The chapter-keyed canon. Everything here is a thing that went wrong while it
         # was being built, and would go wrong silently if it came back.

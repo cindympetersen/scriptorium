@@ -70,6 +70,31 @@ def root():
         d = up
 
 
+class _Implied:
+    """A book-implied locus, wearing the shape the named pattern returns.
+
+    Not a match object; it only has to answer `groups()` and `start()`, which is all
+    `Canon.loci` asks of one. Keeping the duck type means the caller has no idea some of
+    its loci were written without a book name — which is right, because a reader does not
+    either.
+    """
+    __slots__ = ("_g", "_s", "_text")
+
+    def __init__(self, section, m):
+        self._g = (section, m.group(1), m.group(2), m.group(3))
+        self._s = m.start()
+        self._text = f"{section} {m.group(1)}:{m.group(2)}"
+
+    def groups(self):
+        return self._g
+
+    def group(self, n=0):
+        return self._text if n == 0 else self._g[n - 1]
+
+    def start(self):
+        return self._s
+
+
 class Canon:
     def __init__(self, rec, r):
         self.slug = rec.get("canon") or "?"
@@ -140,8 +165,82 @@ class Canon:
         """Is `n` a section this canon actually has? The numeric closed set."""
         return not self.section_count or 1 <= n <= int(self.section_count)
 
+    # A BOOK-IMPLIED LOCUS, which this house writes and no pattern here could see.
+    # `the father "came out, and intreated him" (15:28)` names its book once and then
+    # drops it, and twenty footnotes in this corpus do the same. Until the quoted-span
+    # widening of 2026-09-14 that cost nothing, because the quotation beside it was never
+    # checked; afterwards it cost a FALSE DRIFT — the phrase was measured against the
+    # nearest locus the pattern could see, two verses of the same parable away, and
+    # reported as not found. A checker that flags correct prose is the failure this file
+    # exists to avoid.
+    #
+    # Parenthesised only, and only after a NAMED locus of this canon earlier in the same
+    # text, whose section it inherits. That is the form the house actually writes; a bare
+    # 9:30 in running prose stays a time of day.
+    BARE_RE = re.compile(r"\((\d{1,3}):(\d{1,3})(?:\s*[-–—]\s*(\d{1,3}))?\)")
+
+    # THE BOOK IS INHERITED FROM THE NEAREST PRECEDING NAME, not the nearest preceding
+    # LOCUS, and the difference is not academic. `not-a-bodhisattva [^ear]` reads
+    # "…John 18:10–11 have the ear and not the touch. Luke sets the scene on the mount of
+    # Olives, at *the place* (22:39–40)" — nearest locus is John, nearest NAME is Luke,
+    # and John has 21 chapters. Inheriting from the locus produced "John 22:39 does not
+    # exist in this edition": a true sentence about a citation nobody made. Nearest name
+    # is also how a reader does it.
+    #
+    # AND THE INHERITED BOOK IS VALIDATED AGAINST THE INDEX, which is what makes the name
+    # scan safe. A book name in prose is not always a book: this corpus says "the King
+    # James has it" constantly, and the nearest name before "(15:18–19)" in
+    # the-mask-comes-off-last [^sermon] was therefore James — which has five chapters, so
+    # the tool announced "James 15:18 does not exist in this edition" about a note that
+    # plainly meant Matthew, named in its first three words. Walking back to the nearest
+    # name whose chapter the index ACTUALLY HAS fixes that without a list of phrases to
+    # exclude, and would have fixed it before anyone knew "King James" was the trap.
+
     def section(self, name):
         return self.aliases.get(name, name)
+
+    def _has(self, section, chapter):
+        """Does this canon's index hold that section and chapter? Unknown means yes —
+        an unloadable index must not silently narrow what counts as a locus."""
+        if getattr(self, "_chapters", None) is None:
+            self._chapters = set()
+            try:
+                import gzip
+                op = gzip.open if self.index.endswith(".gz") else open
+                with op(self.index, "rt", encoding="utf-8") as f:
+                    for line in f:
+                        parts = line.split("\t")
+                        if len(parts) >= 3:
+                            self._chapters.add((parts[0], int(parts[1])))
+            except Exception:                                      # noqa: BLE001
+                self._chapters = set()
+        return not self._chapters or (section, chapter) in self._chapters
+
+    def _name_re(self):
+        if getattr(self, "_nre", None) is None:
+            names = sorted(set(self.sections) | set(self.aliases),
+                           key=len, reverse=True)
+            self._nre = (re.compile(r"\b(" + "|".join(re.escape(n) for n in names) + r")\b")
+                         if names else False)
+        return self._nre
+
+    def _all(self, text):
+        """Every locus match in document order, book-implied ones included."""
+        named = list(self.locus_re.finditer(text))
+        if not self.named or not named:
+            return named
+        nre = self._name_re()
+        mentions = list(nre.finditer(text)) if nre else []
+        out = list(named)
+        for b in self.BARE_RE.finditer(text):
+            prior = [m for m in mentions if m.start() < b.start()]
+            ch = int(b.group(1))
+            sec = next((self.section(m.group(1)) for m in reversed(prior)
+                        if self._has(self.section(m.group(1)), ch)), None)
+            if sec is None:
+                continue
+            out.append(_Implied(sec, b))
+        return sorted(out, key=lambda m: m.start())
 
     def loci(self, text):
         """Every locus in `text`, as (key, label, end-of-range).
@@ -155,7 +254,7 @@ class Canon:
         out, seen = [], {}
         if not self.locus_re:
             return out
-        for m in self.locus_re.finditer(text):
+        for m in self._all(text):
             g = m.groups()
             if self.named:
                 sec = self.section(g[0])
