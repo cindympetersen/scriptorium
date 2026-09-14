@@ -535,6 +535,31 @@ def main():
                 lambda rb: preview_problem(rb[1], rb[0]['final'] or rb[0]['url']), previews)):
             row['preview'] = problem
 
+    # ---- unlisted: live, and nothing links to it -----------------------------
+    # A piece can answer 200 at its own URL, sit in the sitemap, and still be unreachable by
+    # a reader, because the page that lists the pieces is built from something else. On
+    # alignmentfellowship that is `content/library.json` in the site repo, a curated reading
+    # order a store publish never touches: five pieces were live and unlisted for days, and
+    # every check here passed them, because presence was only ever asked of the piece's own
+    # URL. The forward check says the door exists; this asks whether anything points at it.
+    unlisted = []
+    if not a.no_reverse:
+        for oname, oc in outlets.items():
+            page = oc.get('index_page')
+            if not page:
+                continue
+            status, body, _f = fetch(page + ('&' if '?' in page else '?') + 'cb=audit', timeout=25)
+            if status != 200 or not body:
+                unlisted.append((None, oname, f'index page {page} answered {status}'))
+                continue
+            hrefs = ' '.join(re.findall(r'href="([^"]+)"', body))
+            for r in results:
+                if r['outlet'] != oname or not r.get('ok'):
+                    continue
+                slug = (r['url'] or '').split('?')[0].rstrip('/').split('/')[-1]
+                if slug and f'/{slug}' not in hrefs:
+                    unlisted.append((r['piece'], oname, slug))
+
     # ---- reverse: what each outlet lists that the desk does not claim --------
     reverse = {}
     if not a.no_reverse:
@@ -640,6 +665,14 @@ def main():
     for name, oname, key in unrecorded:
         print(f"  UNRECORDED  {name} is published and declares {oname}, whose URLs cannot be "
               f"derived — record it under `{key}` or the copy is unaudited")
+
+    if unlisted:
+        for piece, oname, detail in unlisted:
+            if piece is None:
+                print(f"  UNLISTED  {oname}: {detail}")
+            else:
+                print(f"  UNLISTED  {piece} is live on {oname} and nothing on its index page "
+                      f"links to it — a reader browsing the site cannot reach it")
 
     if previews:
         print(f"  preview: {len(previews) - len(no_preview)}/{len(previews)} page(s) have a link "
