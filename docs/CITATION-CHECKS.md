@@ -232,14 +232,34 @@ house avoids elsewhere, and a lingering alias is the name a future session will 
    `NOT HELD`: an unverifiable citation is a failure, not a note.
 5. ✅ **The widened citation signal**, built from the records and deliberately only from
    the canons `check_loci` *cannot* resolve — a King James locus is `check_loci`'s to own.
-6. ⬜ **Indexes per canon**, easiest first. **Arnold's Gita is the one to build next**: a
-   clean Gutenberg text with numbered verses. Pickthall is the hard case and may need page
-   images.
+6. 🟡 **Indexes per canon.** **Arnold's Gita is built (2026-09-14) — by CHAPTER**, because
+   this edition has no verse numbers and none can be derived from it. The plan called it "a
+   clean Gutenberg text with numbered verses"; it is the first half and not the second, and
+   that was asserted without opening the file. The canon record carries
+   `verse_resolution: false` and the finding says which chapter was checked. Building it
+   also produced `section_count` — the numeric form of the KJV's closed section list, after
+   *"Sir Edwin Arnold's \*The Song Celestial\*, 1885"* parsed as chapter 1885 — and a
+   builder that refuses to write an index containing the translator's apparatus.
+   **Pickthall remains unbuilt**; it is the hard case and may need page images.
+7. ⬜ **A second Gita canon for verse resolution.** Telang's prose Gita (*Sacred Books of
+   the East* vol. VIII, 1882) is public domain and numbered. It belongs **beside** Arnold,
+   not instead of him: the corpus quotes Arnold's wording, and a canon record describes an
+   edition rather than a work.
+8. ⬜ **`quoted_spans` reads only italic spans.** Measured 2026-09-14: **65 of 433 footnotes
+   carrying a resolvable locus also carry a double-quoted passage that no italic span
+   covers**, and `check_loci` never looks at one. `both-ends-of-the-leash [^subtil]` quotes
+   twenty verbatim words of Genesis 3:1 in double quotes and the tool prints *"locus only,
+   no quotation to check."* The wording happens to be right; nothing verified it. This is
+   the same silence-shaped failure as the `aliases()` bug, in the other checker, and fixing
+   it changes behaviour across the whole corpus — so it is its own piece of work, with its
+   own before-and-after measurement.
 
-**Standing today: four pieces carry loci nothing can resolve** — ten Qur'an loci across
-*Jealous of a Calf* and *The Author Is Not a Character*, and Gita loci in *False Light* and
-*Krishna Is Not Christ*. **All four are live posts.** The finding is the deliverable; the
-indexes are the fix.
+**Standing today: ten Qur'an loci across *Jealous of a Calf* and *The Author Is Not a
+Character* still resolve to nothing.** The Gita side is indexed — *False Light*'s chapter XII
+claim now resolves uniquely — with one open question in *Krishna Is Not Christ*, whose
+`[^11]` quotes 4.7–8 in a translation that is **not Arnold's and is not named**: the desk
+holds Arnold, the words are not his, and no translator is given. That is a citation
+question for the author, not a tooling one.
 
 ## What this does not do
 
