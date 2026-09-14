@@ -133,6 +133,13 @@ ROW_RE = re.compile(r"^\|\s*(?:\[(?P<label>[^\]]+)\]\((?P<href>[^)]+)\)|(?P<bare
 # column of its own — one place per fact, and the cell already reads as provenance.
 # It is matched loosely because fifty rows were hand-written before there was a tool:
 # with or without backticks, with an ellipsis or without.
+#
+# A ROW MAY CARRY MORE THAN ONE, AND BOTH CAN BE TRUE. Chiang-story.pdf records the
+# SOURCE bytes it was fetched as, and then the hash of that same scan after ocrmypdf gave
+# it a text layer — provenance and held file, neither redundant. A parser that took the
+# FIRST match called that row a DIGEST MISMATCH against its own correct file, and the
+# finding stood for a day while the data was right the whole time. So: collect them all,
+# and let the bytes on disk say which one is the record of them.
 DIGEST_RE = re.compile(r"sha256\s*`?([0-9a-f]{6,64})(?:…|\.\.\.)?`?", re.I)
 
 
@@ -197,10 +204,10 @@ def rows(r=None):
             if not name or len(cells) < 6:
                 out.append({"line": n, "file": name, "unparsed": line.rstrip()})
                 continue
-            dm = DIGEST_RE.search(cells[3])
+            digs = [m.group(1).lower() for m in DIGEST_RE.finditer(cells[3])]
             out.append({"line": n, "file": os.path.basename(name),
                         "book": cells[1], "work": cells[2], "edition": cells[3],
-                        "digest": (dm.group(1).lower() if dm else None),
+                        "digests": digs, "digest": (digs[0] if digs else None),
                         "added": cells[4], "redistribution": cells[5],
                         "restricted": _restricted(cells[5]),
                         "verdict_stated": _verdict(cells[5]) is not None})
@@ -221,6 +228,25 @@ def files_on_disk(r=None):
 def index_for(filename, r=None):
     stem = re.sub(r"\.(pdf|txt|md|html?|epub)$", "", filename, flags=re.I)
     return os.path.join(refdir(r), INDEX_DIR, stem + ".tsv.gz")
+
+
+def held_digest(row, path):
+    """(digest, status) — the row's record OF THE BYTES ON DISK, out of however many it
+    carries. status is 'match', 'mismatch' (it carries hashes and the file answers to
+    none of them) or 'none' (it carries no hash at all).
+
+    `digest` alone cannot answer this, because a row legitimately holds more than one hash
+    and only one of them is the held file. Asking the file which is which is the only rule
+    that does not depend on the order a human wrote them in.
+    """
+    digs = row.get("digests") or ([row["digest"]] if row.get("digest") else [])
+    if not digs:
+        return None, "none"
+    actual = sha256(path)
+    for d in digs:
+        if actual.startswith(d):
+            return d, "match"
+    return None, "mismatch"
 
 
 def sha256(path):
@@ -782,14 +808,14 @@ def _shelf_targets(r):
             refused.append((f, "no manifest row")); continue
         if not row.get("verdict_stated"):
             refused.append((f, "no redistribution verdict in its row")); continue
-        d = row.get("digest")
         path = os.path.join(refdir(r), f)
-        if not d:
+        d, st = held_digest(row, path)
+        if st == "none":
             refused.append((f, "no digest in its row — `references.py rehash`")); continue
+        if st == "mismatch":
+            refused.append((f, "DIGEST MISMATCH — the row describes other bytes")); continue
         if len(d) < 64:
             refused.append((f, "truncated digest — `references.py rehash`")); continue
-        if sha256(path) != d:
-            refused.append((f, "DIGEST MISMATCH — the row describes other bytes")); continue
         ok.append((row, path, d))
     return ok, refused
 
@@ -922,8 +948,15 @@ def cmd_rehash(argv):
     r = root()
     force = "--force" in argv
     dry = "--dry-run" in argv
-    path = readme(r)
-    lines = open(path, encoding="utf-8").read().splitlines(keepends=True)
+    # NAMED `manifest`, NOT `path`, AND THE NAME IS THE FIX. A loop below walks the held
+    # files and wants a path of its own; when both were called `path` the loop's value
+    # survived it, and the write at the end put the MANIFEST'S TEXT INTO THE LAST HELD
+    # FILE. Measured 2026-09-14: Chiang-story.pdf, the last row in the table, went from a
+    # 2.6 MB scan to 50 KB of README — a copyrighted, gitignored, untracked file that git
+    # had no copy of. A shadowed name in a function that writes files is not a style
+    # matter.
+    manifest = readme(r)
+    lines = open(manifest, encoding="utf-8").read().splitlines(keepends=True)
     disk = set(files_on_disk(r))
     filled = updated = kept = 0
     conflicts = []
@@ -931,19 +964,24 @@ def cmd_rehash(argv):
         f = row.get("file")
         if not f or "unparsed" in row or f not in disk:
             continue
-        actual = sha256(os.path.join(refdir(r), f))
-        have = row.get("digest")
+        path = os.path.join(refdir(r), f)
+        actual = sha256(path)
+        have, st = held_digest(row, path)
         if have == actual:
             kept += 1
             continue
         i = row["line"] - 1
         line = lines[i]
-        if have and not actual.startswith(have):
-            conflicts.append((f, have, actual, i))
+        if st == "mismatch":
+            conflicts.append((f, ", ".join(row.get("digests") or []), actual, i))
             if not force:
                 continue
+            have = (row.get("digests") or [None])[0]
         if have:
-            line = DIGEST_RE.sub(f"sha256 `{actual}`", line, count=1)
+            # ONLY the hash that IS the file grows to full length. A row may also record
+            # the SOURCE bytes it was fetched as — provenance for an artifact the desk no
+            # longer holds, which cannot be expanded and must not be overwritten.
+            line = line.replace(have, actual, 1)
             updated += 1
         else:
             # No digest anywhere in the row: add one to the end of the provenance cell,
@@ -954,7 +992,9 @@ def cmd_rehash(argv):
             filled += 1
         lines[i] = line
     if not dry:
-        open(path, "w", encoding="utf-8").write("".join(lines))
+        # Belt and braces: the only file this function may write is the manifest.
+        assert os.path.basename(manifest) == "README.md", manifest
+        open(manifest, "w", encoding="utf-8").write("".join(lines))
     for f, have, actual, _ in conflicts:
         print(f"  ⚠️  DIGEST MISMATCH: {f}\n"
               f"      row says  {have}…\n"
@@ -1015,26 +1055,27 @@ def cmd_check(argv):
         # THE DIGEST IS A SECOND RECORD OF THE SAME FACT, written at a different time,
         # and the only thing that can notice a file swapped under its own name — a
         # re-download that changed edition while the row went on describing the old one.
-        d = row.get("digest")
-        if not d:
+        path = os.path.join(refdir(r), f)
+        d, st = held_digest(row, path)
+        if st == "none":
             print(f"  NO DIGEST: {f}  (line {row['line']}) — nothing can tell whether "
                   f"these are the bytes the row describes. `references.py rehash`")
             bad += 1
-        else:
-            actual = sha256(os.path.join(refdir(r), f))
-            if not actual.startswith(d):
-                # A MISMATCH IS NOT A TRUNCATION, and the two must not share a message.
-                # `rehash` deliberately refuses this row, so telling the reader to run it
-                # would send them to a tool that does nothing and looks broken.
-                print(f"  ⚠️  DIGEST MISMATCH: {f}  (line {row['line']}) — the row "
-                      f"describes bytes that are not on disk\n"
-                      f"      row says  {d}{'…' if len(d) < 64 else ''}\n"
-                      f"      file is   {actual}")
-                bad += 1
-            elif len(d) < 64:
-                print(f"  TRUNCATED DIGEST: {f}  (line {row['line']}) — the prefix "
-                      f"matches, but a prefix addresses nothing. `references.py rehash`")
-                bad += 1
+        elif st == "mismatch":
+            # A MISMATCH IS NOT A TRUNCATION, and the two must not share a message.
+            # `rehash` deliberately refuses this row, so telling the reader to run it
+            # would send them to a tool that does nothing and looks broken. Every hash
+            # the row carries is printed, because a row with several is exactly where a
+            # reader needs to see which ones were considered.
+            print(f"  ⚠️  DIGEST MISMATCH: {f}  (line {row['line']}) — the row describes "
+                  f"bytes that are not on disk\n"
+                  f"      row says  {', '.join(x + '…' for x in row.get('digests') or [])}\n"
+                  f"      file is   {sha256(path)}")
+            bad += 1
+        elif len(d) < 64:
+            print(f"  TRUNCATED DIGEST: {f}  (line {row['line']}) — the prefix "
+                  f"matches, but a prefix addresses nothing. `references.py rehash`")
+            bad += 1
         if not row.get("verdict_stated"):
             # Fail-closed protects the bytes; this gets the ROW fixed. A cell this
             # parser cannot classify is treated as restricted AND reported, because one

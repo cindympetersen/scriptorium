@@ -363,6 +363,67 @@ def unit_references(tmp):
           R.text_layer_verdict(src, out) is None)
 
 
+def unit_rehash(tmp):
+    """`rehash` writes the MANIFEST and nothing else — and a row may carry several hashes.
+
+    Both halves are the same incident, 2026-09-14. A held file's path was assigned to a
+    variable called `path` inside the loop, shadowing the manifest's own `path` from above
+    it, so the write at the end put the MANIFEST'S TEXT INTO THE LAST HELD FILE:
+    Chiang-story.pdf went from a 2.6 MB scan to 50 KB of README. It was gitignored and
+    untracked, so git had no copy; it came back only because its manifest row recorded the
+    source URL and the source hash.
+
+    And the reason rehash was touching that row at all is the second half: the row records
+    TWO hashes on purpose — the source bytes as fetched, and the same scan after ocrmypdf
+    gave it a text layer. A parser that took the first called the row a DIGEST MISMATCH
+    against its own correct file. Both are true; the bytes on disk say which is which.
+    """
+    print("\n-- references: rehash writes the manifest, and only the manifest ------")
+    import io, contextlib, hashlib, importlib.util, os
+    spec = importlib.util.spec_from_file_location(
+        'references', os.path.join(os.path.dirname(__file__), 'references.py'))
+    R = importlib.util.module_from_spec(spec); spec.loader.exec_module(R)
+
+    home = os.path.join(tmp, 'rehash-inst')
+    refs = os.path.join(home, 'references')
+    os.makedirs(refs); os.makedirs(os.path.join(home, 'books', 'tst'))
+    held = {'one.txt': b'the first held source, at some length.' * 8,
+            'two.txt': b'the second held source, longer still, and different.' * 9}
+    for name, body in held.items():
+        open(os.path.join(refs, name), 'wb').write(body)
+    H = {n: hashlib.sha256(b).hexdigest() for n, b in held.items()}
+    PROV = 'deadbeefdeadbeef'          # a source hash for bytes the desk no longer holds
+    open(os.path.join(refs, 'README.md'), 'w').write(
+        '# R\n\n| File | Book | Work | Edition / provenance | Added | Redistribution |\n'
+        '|---|---|---|---|---|---|\n'
+        f'| [one.txt](one.txt) | tst | *One* — A (1) | sha256 `{H["one.txt"][:16]}…` | 2026-09-14 | ✅ Public. |\n'
+        f'| [two.txt](two.txt) | tst | *Two* — B (2) | source bytes sha256 `{PROV}…`; the held file '
+        f'sha256 `{H["two.txt"][:16]}…` | 2026-09-14 | ✅ Public. |\n')
+    R.root = lambda: home
+
+    row2 = [x for x in R.rows(home) if x.get('file') == 'two.txt'][0]
+    check('rehash: a row carrying two hashes parses both',
+          row2['digests'] == [PROV, H['two.txt'][:16]], str(row2.get('digests')))
+    d, st = R.held_digest(row2, os.path.join(refs, 'two.txt'))
+    check('rehash: the held digest is the one the BYTES answer to, not the first written',
+          st == 'match' and d == H['two.txt'][:16], f'{st} {d}')
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        R.cmd_rehash([])
+
+    # THE CHECK THAT WOULD HAVE CAUGHT IT.
+    for name, body in held.items():
+        check(f'rehash: {name} is byte-for-byte untouched — rehash writes no held file',
+              open(os.path.join(refs, name), 'rb').read() == body,
+              f'{os.path.getsize(os.path.join(refs, name))} bytes now')
+
+    body = open(os.path.join(refs, 'README.md')).read()
+    check('rehash: the matching hash is expanded to its full length',
+          H['one.txt'] in body and H['two.txt'] in body)
+    check('rehash: a PROVENANCE hash is left alone — those bytes are not held and cannot '
+          'be expanded', f'`{PROV}…`' in body, body[body.find('two.txt'):][:200])
+
+
 def unit_shelf(tmp):
     """push/pull against a fake bucket. No AWS, and the refusals are the point.
 
@@ -5555,6 +5616,7 @@ def main():
         unit_commonmark(tmp)
         unit_references(tmp)
         unit_canons(tmp)
+        unit_rehash(tmp)
         unit_shelf(tmp)
         unit_reference_add(tmp)
         unit_quotes(tmp)
