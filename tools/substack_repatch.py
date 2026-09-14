@@ -279,6 +279,12 @@ JS_HELPERS = r"""  // Substack owns some blocks in its own document: a subscribe
   // contiguous spans of the same kind (and, for a link, the same href) are merged before
   // anything is compared. Merge first, trim after: a span is contiguous with its neighbour
   // only while it still owns the space between them.
+  // Shared by the PLAN (which asks whether a node's formatting changed) and by the final
+  // report. They used to live only in the report; the plan referencing them from up here
+  // crashed with "Cannot access 'runKeys' before initialization", because a const is not
+  // hoisted for use. (2026-09-14, adding fnReplace.)
+  const runKeys = runs => runs.map(r => r.kind + ' ' + sameText(r.text) + ' ' + (r.href || ''));
+  const wantKeys = t => runKeys((t.marks || []).map(r => ({ kind: r.kind, text: r.text, href: r.href })));
   const marksOf = node => {
     const raw = []; let acc = 0;
     node.descendants(c => {
@@ -655,7 +661,7 @@ STRUCTURAL_JS = r"""(async () => {
   const report = { mode: 'structural', refused: null, ok: false, applied: [], failed: [],
                    titleChanged: false, subtitleChanged: false,
                    marks: { applied: [], review: [], failed: [], unchanged: 0 },
-                   plan: { replace: 0, insert: 0, delete: 0, hunk: 0, fnHunk: 0, dropAnchor: 0 } };
+                   plan: { replace: 0, insert: 0, delete: 0, hunk: 0, fnHunk: 0, fnReplace: 0, dropAnchor: 0 } };
   const refuse = (why, extra) => { report.refused = why; Object.assign(report, extra || {}); return JSON.stringify(report); };
 
   // --- scrape the live doc: body nodes with their anchors (numbered in document order, which
@@ -750,11 +756,45 @@ STRUCTURAL_JS = r"""(async () => {
   if (added.length) return refuse('the draft adds footnote(s) the live post lacks — insertFootnote is not automated here; add them by hand in the composer, or recompose', { added });
   for (let a = 1; a < fnPairs.length; a++) if (fnPairs[a].j <= fnPairs[a - 1].j)
     return refuse('footnote order differs between the draft and the live post', { fnPairs });
-  for (const p of fnPairs) if (sameText(live.fns[p.k].text) !== sameText(T.fns[p.j].text)) { ops.push({ kind: 'fnHunk', k: p.k, j: p.j }); report.plan.fnHunk++; }
+  // A FOOTNOTE WHOSE FORMATTING CHANGED IS REPLACED WHOLE, not hunked.
+  //
+  // A text hunk can only rewrite a run of uniform marks, so a footnote re-quoted from a
+  // different source — new italics in new places — fails with "a hunk crosses a formatting
+  // boundary" and the whole run aborts with nothing applied. Measured 2026-09-14 on
+  // krishna-is-not-christ [^11], whose Gita quotation was replaced with Arnold's: the
+  // surgical engine refused it as too dissimilar (0.143) and this one could not express it.
+  //
+  // Replacing a footnote's CONTENT whole is as safe as replacing a body block — safer, in
+  // fact: the anchors live in the BODY, so a footnote node contains no inline node that a
+  // replacement could destroy, which is the hazard the anchor-bearing rule exists for. The
+  // content comes from the converter's own HTML, so it arrives with its marks already on it.
+  for (const p of fnPairs) {
+    const textDiffers = sameText(live.fns[p.k].text) !== sameText(T.fns[p.j].text);
+    if (!textDiffers) continue;
+    const liveRuns = JSON.stringify(runKeys(marksOf(live.fns[p.k].node)));
+    const wantRuns = JSON.stringify(wantKeys(T.fns[p.j]));
+    if (liveRuns !== wantRuns) {
+      // A LINK IS THE ONE MARK THIS CANNOT PUT BACK. fnReplace lands plain text and lets
+      // the marks pass dress it, and that pass reports link marks rather than applying
+      // them — a link carries Substack's own attributes. So a footnote whose formatting
+      // changed AND which carries a link would come out with its link silently gone from
+      // a live post. Refuse instead, and say what to do. (Measured 2026-09-14 on flow
+      // [^cohort] and the-distance-that-love-needs [^2], whose only mark is a link.)
+      if ((T.fns[p.j].marks || []).some(m => m.kind === 'link'))
+        return refuse('footnote ' + p.k + ' changed its formatting and carries a link — '
+                    + 'replacing it would drop the link, and a link mark cannot be reapplied '
+                    + 'automatically. Edit this footnote by hand in the composer, or make the '
+                    + 'change small enough that its marked runs are unchanged.',
+                      { footnote: p.k, name: T.fns[p.j].name });
+      ops.push({ kind: 'fnReplace', k: p.k, j: p.j }); report.plan.fnReplace++;
+    }
+    else { ops.push({ kind: 'fnHunk', k: p.k, j: p.j }); report.plan.fnHunk++; }
+  }
   for (const d of dropAnchors) { ops.push({ kind: 'dropAnchor', liveIdx: d.liveIdx, seq: d.anchor.seq }); report.plan.dropAnchor++; }
 
   // --- 3. apply, latest document position first, re-reading the doc before every op ---
-  const keyOf = o => o.kind === 'fnHunk' ? 1e6 + o.k : o.kind === 'replace' ? (o.i1 === o.i2 ? o.i1 - 0.5 : o.i1) : o.liveIdx;
+  const keyOf = o => (o.kind === 'fnHunk' || o.kind === 'fnReplace') ? 1e6 + o.k
+                   : o.kind === 'replace' ? (o.i1 === o.i2 ? o.i1 - 0.5 : o.i1) : o.liveIdx;
   ops.sort((a, b) => keyOf(b) - keyOf(a));
   const hunkNode = (rec, targetText, label) => {
     const hunks = diffHunks(flat(rec.text), targetText).sort((a, b) => b.aStart - a.aStart);
@@ -779,6 +819,23 @@ STRUCTURAL_JS = r"""(async () => {
         hunkNode(L.fns[o.k], T.fns[o.j].text, 'footnote ' + o.k);
         if (await sha(sameText(scrape().fns[o.k].text)) !== T.fns[o.j].hash) throw new Error('footnote ' + o.k + ' did not land as the draft has it');
         report.applied.push({ kind: 'fnHunk', footnote: o.k });
+      } else if (o.kind === 'fnReplace') {
+        // Replace the footnote's CONTENT as ONE UNMARKED RUN, never the footnote node:
+        // deleting the node would orphan its anchor in the body and renumber every note
+        // after it. Plain text, because the formatting is then put on by step 3b — the
+        // same marks pass that already dresses every hunk-edited node, which is where a
+        // footnote's marks have always come from. Nothing new has to understand HTML, and
+        // the insert is one uniform run, so it cannot cross a formatting boundary.
+        const rec = L.fns[o.k];
+        const inner = rec.pos + 1, innerEnd = rec.pos + rec.node.nodeSize - 1;
+        let inl = 0; ed.state.doc.nodesBetween(inner, innerEnd, n => { if (!n.isText && n.isInline) inl++; });
+        if (inl) throw new Error('footnote ' + o.k + ': carries an inline node — refusing to replace it whole');
+        const txt = smarten(T.fns[o.j].text, ' ');
+        ed.view.dispatch(ed.state.tr.replaceWith(inner, innerEnd, ed.state.schema.text(txt, [])));
+        const after = scrape();
+        if (after.fns.length !== L.fns.length) throw new Error('footnote count changed while replacing footnote ' + o.k);
+        if (await sha(sameText(after.fns[o.k].text)) !== T.fns[o.j].hash) throw new Error('footnote ' + o.k + ' did not land as the draft has it');
+        report.applied.push({ kind: 'fnReplace', footnote: o.k });
       } else if (o.kind === 'hunk') {
         hunkNode(L.body[o.liveIdx], T.body[o.targetIdx].text, 'block ' + o.liveIdx);
         if (await sha(sameText(scrape().body[o.liveIdx].text)) !== T.body[o.targetIdx].hash) throw new Error('block ' + o.liveIdx + ' did not land as the draft has it');
@@ -812,7 +869,17 @@ STRUCTURAL_JS = r"""(async () => {
         report.applied.push({ kind: o.i1 === o.i2 ? 'insert' : o.j1 === o.j2 ? 'delete' : 'replace', at: o.i1, blocks: o.j2 - o.j1 });
       }
     }
-  } catch (e) { report.failed.push(String(e)); }
+  } catch (e) {
+    report.failed.push(String(e));
+    // A FAILURE IS NOT A REFUSAL, and `applied: []` does not mean the document is clean.
+    // hunkNode dispatches its hunks one at a time, so a throw on the last of them leaves the
+    // earlier ones in the document — and the op that threw never reaches report.applied, so
+    // the report looked untouched while the live post had been half-edited. Measured
+    // 2026-09-14 on krishna-is-not-christ, whose footnote 10 was partly rewritten by a run
+    // that reported applying nothing. `refused` still means nothing was touched; `partial`
+    // says the opposite out loud, and `final` says exactly what stands.
+    report.partial = true;
+  }
 
   // --- 3b. marks, once the blocks have stopped moving ---
   // A block replaced whole came in as the converter's own HTML and already carries its
@@ -849,8 +916,6 @@ STRUCTURAL_JS = r"""(async () => {
   // Read the marks back too. The block digest cannot see them, so without this the final
   // report would certify a document it had only half looked at.
   const markMismatch = [];
-  const runKeys = runs => runs.map(r => r.kind + ' ' + sameText(r.text) + ' ' + (r.href || ''));
-  const wantKeys = t => runKeys((t.marks || []).map(r => ({ kind: r.kind, text: r.text, href: r.href })));
   F.body.forEach((b, i) => { if (T.body[i] && JSON.stringify(runKeys(marksOf(b.node))) !== JSON.stringify(wantKeys(T.body[i]))) markMismatch.push('block ' + i); });
   F.fns.forEach((f, k) => { if (T.fns[k] && JSON.stringify(runKeys(marksOf(f.node))) !== JSON.stringify(wantKeys(T.fns[k]))) markMismatch.push('footnote ' + k); });
   const linksMissing = [], dividersOff = [];

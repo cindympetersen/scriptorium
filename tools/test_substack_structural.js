@@ -220,5 +220,38 @@ const plainIdx = (pred = () => true) => TARGET.body.findIndex((b, i) => !b.ancho
             && r.report.marks.applied.some(a => a.op === 'remove'),
             summary(r) + ' marks=' + JSON.stringify(r.report.marks)); } }
 
+  // --- S12 a footnote whose FORMATTING changed is replaced whole, not hunked -------------
+  // The case that could not be expressed until 2026-09-14: krishna-is-not-christ [^11] was
+  // re-quoted from a different translation, so its italics moved as well as its words. A
+  // text hunk can only rewrite a run of uniform marks, so it threw "a hunk crosses a
+  // formatting boundary" and the whole run aborted with nothing applied — while the
+  // surgical engine had already refused it as too dissimilar. The document was reachable by
+  // neither engine.
+  // Pick a footnote whose marks this path can actually restore: a LINK is refused at plan
+  // time, because the marks pass reports link marks rather than applying them.
+  { const j = TARGET.fns.findIndex(f => (f.marks || []).length
+      && f.marks.every(m => m.kind !== 'link')
+      && new Set(f.marks.map(m => norm(m.text))).size === f.marks.length);
+    if (j < 0) skip('S12 a re-formatted footnote is replaced whole', 'no footnote carries marks and html');
+    else { const tops = liveFromTarget(TARGET);
+      const fnTops = tops.filter(t => t.name === 'footnote');
+      // make the live footnote differ in BOTH text and mark structure: one plain run
+      const want = TARGET.fns[j];
+      fnTops[j].kids = [{ isText: true, text: 'an older wording of this note entirely, unmarked.', marks: [] }];
+      const r = await run(tops);
+      const after = r.tops.filter(t => t.name === 'footnote')[j];
+      const landed = after.kids.map(x => x.text).join('');
+      check('S12 a re-formatted footnote is replaced whole, keeping its marks',
+            r.report.ok
+            && r.report.applied.some(x => x.kind === 'fnReplace' && x.footnote === j)
+            && r.report.plan.fnReplace === 1
+            && norm(landed) === norm(want.text)
+            && !(r.report.final.markMismatch || []).length,
+            summary(r) + ' landed=' + JSON.stringify(landed.slice(0, 60)));
+      check('S12 the footnote count and every anchor survive the replacement',
+            r.report.final && r.report.final.footnotes === TARGET.fns.length + '/' + TARGET.fns.length
+            && r.report.final.anchors.split('/')[0] === r.report.final.anchors.split('/')[1],
+            r.report.final && JSON.stringify(r.report.final)); } }
+
   process.exit(failures ? 1 : 0);
 })().catch(e => { console.log('FAIL  runner crashed   ' + (e.stack || e)); process.exit(1); });
