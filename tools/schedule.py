@@ -524,8 +524,11 @@ def _runbook_text(pdir, moment, root):
     A(f'      still calls this piece unpublished in prose somewhere until you fix it.')
     n += 1
     if note:
-        A(f'{n}. THE NOTE ({note}) goes with the post, and may already be scheduled on Substack\'s')
-        A(f'   own scheduler for this moment — check before posting anything, or you post a second.')
+        A(f'{n}. THE NOTE ({note}). POST IT AFTER THE POST IS LIVE, not with it — a Note composed')
+        A(f'   before its post is public gets NO CARD, and the card is a stored attachment that')
+        A(f'   never backfills, so a bare truncated link is what every reader sees for the life of')
+        A(f'   the post (measured 2026-09-14). Check first whether one is already scheduled on')
+        A(f'   Substack\'s own scheduler, or you post a second one.')
         A(f'     substack_notes.py record {slug}     # takes the id from the public feed')
         A(f'     substack_notes.py verify {slug}')
         A(f'   A fresh publication\'s own Note does not use the day\'s backlog slot.')

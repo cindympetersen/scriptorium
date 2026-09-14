@@ -296,3 +296,26 @@ note."*)
 **The link preview is in there because it is the step a store publish structurally cannot do:**
 `og:image` is a file in the site repo and an upload never touches that repo. It was forgotten again
 on 2026-09-12 and `outlet_audit` caught it — a live page whose shared link showed no image.
+
+## The Note's card is spent by scheduling it
+
+A Note announces a post, so it is tempting to put it on the composer's own scheduler for the same
+moment. **That spends the post's card permanently.**
+
+The card is not resolved from the URL when someone reads the Note. It is a **stored attachment**,
+written at compose time, and Substack will not attach a post that is not yet public. Measured
+2026-09-14, on a Note two days old whose post had been live the entire time:
+`/api/v1/reader/comment/<id>` returns **`attachments: []`**. It never backfills, a posted Note
+cannot be edited, and the only way to get the card is to post a different Note.
+
+So the default is **not** the composer's Schedule. It is `substack_notes.py task <slug>
+--post-url <url> --at "<moment>"`, which schedules a session to post the Note a few minutes
+**after** the post goes live and guards on **`card` must be true**. The composer's Schedule is the
+fallback for an author who would rather not have a session wake up — and it is only offered with
+the cost said out loud, because a plain truncated link is what every reader of that Note gets,
+for as long as the post exists.
+
+*(Written after doing it the wrong way round on 2026-09-12: the Note was scheduled for the same
+moment as the post, fired 85 seconds before it, and carries a bare `elmuffin.substack.com/p…`
+where the card should be. The mechanism to do it properly already existed and was not reached
+for.)*

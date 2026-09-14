@@ -898,6 +898,16 @@ satisfy the Clipboard API, so on real Chrome the click has to be a real one.
       2026-09-11). So a scheduled Note carries a **plain link**; a Note posted after the post is
       live carries the **card**.
 
+      **AND THE COST IS PERMANENT — measured 2026-09-14 on a Note two days old whose post had
+      been live the whole time.** The card is not a render-time lookup of the URL: it is a
+      STORED ATTACHMENT written when the Note is composed. A Note composed before its post was
+      public has `attachments: []` on `/api/v1/reader/comment/<id>`, and it stays empty forever.
+      Nothing backfills it, Substack does not let a posted Note be edited, and the only way to
+      get the card is a different Note. **So this is not a cosmetic difference to be weighed
+      lightly: scheduling the Note spends the card for the life of the post.** Prefer the task
+      below; reach for the composer's Schedule only when the author has been told that, in those
+      words, and still wants it.
+
       `substack_notes.py task <slug> --post-url <url> --at "<moment>"` prints the self-contained
       prompt for that task — every guard in it is there because a scheduled session has nobody
       watching: the post must serve its BODY (not the scheduled-post teaser), no Note may already
