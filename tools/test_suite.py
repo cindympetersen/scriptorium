@@ -626,28 +626,42 @@ def unit_canons(tmp):
         # measurement is in refindex.build_quran_tanzil: 5,269 of 6,236 ayah markers
         # survived that OCR, 614 interior gaps, 79 of 114 surah openings.
         q = by['quran']
-        check('canons: quran is indexed and resolves verses', q.has_index and q.verse_resolution)
-        idx = L.load(q.index)
-        check('canons: the quran index holds 6,236 ayat in 114 surahs',
-              len(idx) == 6236 and len({k[1] for k in idx}) == 114,
-              f'{len(idx)} rows, {len({k[1] for k in idx})} surahs')
-        check('canons: every surah runs 1..n with no interior gap',
-              all(sorted(v for (c, ch, v) in idx if ch == n)
-                  == list(range(1, 1 + sum(1 for (c, ch, v) in idx if ch == n)))
-                  for n in (1, 2, 29, 112, 114)))
-        # A WHOLE-SECTION CITATION IS A REAL CITATION: the house cites al-Ikhlas as
-        # "Qur'an 112", and keying that on an ayah the index cannot hold answered
-        # "112:0 does not exist in this edition" — true, and useless.
-        whole = q.loci("Qur'an 112")
-        check('canons: a surah cited whole keys on its first verse and ranges to its last',
-              [x[0] for x in whole] == [('quran', 112, 1)] and whole[0][2] == 4,
-              str(whole))
-        check('canons: and its label says both what was cited and what was checked',
-              'whole' in whole[0][1] and '112' in whole[0][1], whole[0][1])
-        check('canons: an ayah-level locus keys on the ayah',
-              [x[0] for x in q.loci("Qur'an 29:46")] == [('quran', 29, 46)])
-        check('canons: surah 115 is not a locus — section_count is the closed set',
-              q.loci("Qur'an 115:1") == [])
+        # THIS CANON'S INDEX IS NOT COMMITTED, unlike the KJV's and the Gita's: Tanzil's
+        # terms are non-commercial, no-redistribution, so the file and its index are
+        # gitignored (references/canons/quran-pickthall.yaml says so). The CANON RECORD is
+        # tracked, so `by` holds 'quran' in a tree that cannot hold its index — an export,
+        # a CI checkout, a fresh clone. Loading it unconditionally raised FileNotFoundError
+        # and took the whole suite down with no summary, which made every push from the
+        # desk fail (2026-09-14). Skip, loudly, with the rebuild command: "could not look"
+        # must never wear the same face as "passed", and must never look like a crash either.
+        if not (q.index and os.path.exists(q.index)):
+            skip('canons: the quran index assertions',
+                 'index absent — not committed, Tanzil is no-redistribution; rebuild with '
+                 'refindex.py references/quran-pickthall-tanzil.txt --scheme quran-tanzil '
+                 '--out references/quran-pickthall.tsv.gz')
+        else:
+            check('canons: quran is indexed and resolves verses', q.has_index and q.verse_resolution)
+            idx = L.load(q.index)
+            check('canons: the quran index holds 6,236 ayat in 114 surahs',
+                  len(idx) == 6236 and len({k[1] for k in idx}) == 114,
+                  f'{len(idx)} rows, {len({k[1] for k in idx})} surahs')
+            check('canons: every surah runs 1..n with no interior gap',
+                  all(sorted(v for (c, ch, v) in idx if ch == n)
+                      == list(range(1, 1 + sum(1 for (c, ch, v) in idx if ch == n)))
+                      for n in (1, 2, 29, 112, 114)))
+            # A WHOLE-SECTION CITATION IS A REAL CITATION: the house cites al-Ikhlas as
+            # "Qur'an 112", and keying that on an ayah the index cannot hold answered
+            # "112:0 does not exist in this edition" — true, and useless.
+            whole = q.loci("Qur'an 112")
+            check('canons: a surah cited whole keys on its first verse and ranges to its last',
+                  [x[0] for x in whole] == [('quran', 112, 1)] and whole[0][2] == 4,
+                  str(whole))
+            check('canons: and its label says both what was cited and what was checked',
+                  'whole' in whole[0][1] and '112' in whole[0][1], whole[0][1])
+            check('canons: an ayah-level locus keys on the ayah',
+                  [x[0] for x in q.loci("Qur'an 29:46")] == [('quran', 29, 46)])
+            check('canons: surah 115 is not a locus — section_count is the closed set',
+                  q.loci("Qur'an 115:1") == [])
 
     if 'gita' in by:
         # The chapter-keyed canon. Everything here is a thing that went wrong while it
