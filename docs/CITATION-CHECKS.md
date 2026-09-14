@@ -245,21 +245,37 @@ house avoids elsewhere, and a lingering alias is the name a future session will 
    the East* vol. VIII, 1882) is public domain and numbered. It belongs **beside** Arnold,
    not instead of him: the corpus quotes Arnold's wording, and a canon record describes an
    edition rather than a work.
-8. ⬜ **`quoted_spans` reads only italic spans.** Measured 2026-09-14: **65 of 433 footnotes
-   carrying a resolvable locus also carry a double-quoted passage that no italic span
-   covers**, and `check_loci` never looks at one. `both-ends-of-the-leash [^subtil]` quotes
-   twenty verbatim words of Genesis 3:1 in double quotes and the tool prints *"locus only,
-   no quotation to check."* The wording happens to be right; nothing verified it. This is
-   the same silence-shaped failure as the `aliases()` bug, in the other checker, and fixing
-   it changes behaviour across the whole corpus — so it is its own piece of work, with its
-   own before-and-after measurement.
+8. ✅ **`quoted_spans` reads quotation marks too** (2026-09-14), and a **book-implied
+   locus** with it. Corpus before → after: quotations checked **439 → 510**, MATCH
+   **425 → 495**, *"locus only, no quotation to check"* **227 → 181**. Exactly **two new
+   findings, both real** — *The Sheep in the Basement* `[^17]` quotes Matthew 7:16–20 and
+   cites only 7:20; *The Way Home Is Down* `[^prodigal]` has *"came out, and intreated
+   him"* where the King James reads *"came his father out, and intreated him"*, an elision
+   inside quotation marks and unmarked.
+
+   Two traps came with it, and the second is the reusable one. **Inherit the book from the
+   nearest NAME, not the nearest LOCUS**: `not-a-bodhisattva [^ear]` reads *"…John 18:10–11
+   have the ear… Luke sets the scene… at* the place *(22:39–40)"*, and the nearest locus is
+   John, which has 21 chapters — the tool announced *"John 22:39 does not exist in this
+   edition"*, a true sentence about a citation nobody made. Then **validate the inherited
+   book against the index**, because a book name in prose is not always a book: this corpus
+   says *"the King James has it"* constantly, so the nearest name before *(15:18–19)* in
+   `the-mask-comes-off-last [^sermon]` was James, which has five chapters. Walking back to
+   the nearest name whose chapter the index actually holds fixes it **without a list of
+   phrases to exclude** — and would have fixed it before anyone knew "King James" was the
+   trap.
+
+**What the two fixes caught first, together.** *Krishna Is Not Christ* `[^11]` quoted
+*Bhagavad Gita* 4.7–8 in a translation it did not name, and no held source had those words.
+The locus named a canon with no index, and the quotation sat in double quotes — so **before
+this week that note produced no finding of any kind.** It now quotes Arnold, and both
+checkers MATCH it. That is this document's argument in one footnote: the apparatus was
+correct, and two blind spots kept it from ever running.
 
 **Standing today: ten Qur'an loci across *Jealous of a Calf* and *The Author Is Not a
-Character* still resolve to nothing.** The Gita side is indexed — *False Light*'s chapter XII
-claim now resolves uniquely — with one open question in *Krishna Is Not Christ*, whose
-`[^11]` quotes 4.7–8 in a translation that is **not Arnold's and is not named**: the desk
-holds Arnold, the words are not his, and no translator is given. That is a citation
-question for the author, not a tooling one.
+Character* still resolve to nothing** — Pickthall is the one canon left unindexed, and it is
+the hard one. The Gita side is indexed and both its pieces now check: *False Light*'s chapter
+XII claim resolves uniquely, and *Krishna Is Not Christ* rests on Arnold.
 
 ## What this does not do
 
