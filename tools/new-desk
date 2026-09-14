@@ -20,7 +20,7 @@
 
 set -euo pipefail
 
-FRAMEWORK_URL="git@github.com:ericgarcia/scriptorium.git"
+FRAMEWORK_URL="git@github.com:muffin-labs/scriptorium.git"
 STARTER_STYLE="plain-english"
 SKILLS=(draft critique style-audit tune-style whats-on-the-desk)
 
