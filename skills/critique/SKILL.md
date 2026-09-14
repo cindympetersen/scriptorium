@@ -72,18 +72,51 @@ app's session list then reads as a shelf of pieces instead of a row of identical
 
 If the author says "review this" on a finished piece, that is `review`.
 
-## Showing the author the piece
+## The deliverable is an artifact — this is not optional
 
-When the author needs to *read* the piece rather than a report on it — a re-voiced draft, a
-pass they have to rule on — render the house review artifact rather than pasting prose into
-chat or building a page by hand:
+**A critique pass ends with the house review artifact published, every time.** Not a report
+pasted into chat, not a page built by hand, not a bulleted list of line numbers. Write the
+findings to `pieces/<slug>/review.json`, render, publish:
 
     python3 framework/tools/review_artifact.py pieces/<slug> --out <file>
 
-then publish that file with the **Artifact** tool, one artifact per piece, republished to the
-same URL as versions land. Facts that cannot be counted go in `pieces/<slug>/review.json` —
-state flags, gates, and every open question listed as a call. Contract:
-`framework/docs/REVIEW-ARTIFACT.md`.
+then publish that file with the **Artifact** tool — one artifact per piece, republished to the
+same URL as versions land. **Chat carries the shape and the link; the page carries the detail.**
+
+*(Eric, 2026-09-14: the artifact "should happen by default in our framework." It already did for
+`review`; `critique` had it behind a condition — "when the author needs to read the piece rather
+than a report on it" — which is a judgment call the skill was making on the author's behalf every
+time, and making wrong. A critique is *always* a set of proposed changes to prose, and a proposed
+change is only judgeable where it lands.)*
+
+**The one exception:** a single wording question mid-draft — the author asks about one sentence
+and wants one sentence back. That is a conversation, not a pass. Everything larger is a pass.
+
+### What the tool will refuse, and why
+
+`review_artifact.py` **exits 3 and writes no file** rather than render a page that looks complete
+and is not. Three refusals worth knowing before you write the JSON, because each one costs a
+round trip:
+
+- **An anchor that matches nothing, matches twice, or overlaps another finding's anchor.**
+  Lengthen it until it is unique. Build the JSON with a script that asserts
+  `draft.count(anchor) == 1` and the failure never reaches the tool.
+- **A `was` key.** `was` is *derived from the anchor* — the anchor **is** the text being
+  replaced. Give `anchor` and `now`, never `was`.
+- **A finding with no `now`.** Every finding proposes a change; a diagnosis with no replacement
+  is a question, and questions belong in `calls`. A deletion is a replacement of a wider span:
+  anchor what goes **and** what survives, and let `now` be what remains.
+
+Facts that cannot be counted go in the same `review.json` — `state` flags, `gates`, and every
+open question listed under `calls`. Full contract: `framework/docs/REVIEW-ARTIFACT.md`.
+
+### Ranking
+
+Findings render in the order given, and that order is what the author reads first. Rank them:
+**fidelity** (a claim that is not true, a fact that came from memory) above **argument** (a gap
+or an overreach in the reasoning) above **voice** (the constitution). A voice miss that the
+style's own `corrections.md` has already caught once outranks a fresh one — a fault that recurs
+is evidence for the next `tune-style`, and saying so in the finding is how it gets there.
 
 ## When a wording change is accepted
 

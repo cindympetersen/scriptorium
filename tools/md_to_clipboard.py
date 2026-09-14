@@ -334,10 +334,20 @@ def do_paste(read_back, expected: str, expect_url: str, app: str, label: str) ->
         sys.exit('md_to_clipboard: the pasteboard changed under the lease (%s → %s). Something is '
                  'writing it without taking the lease. Nothing pasted.'
                  % (_sha(expected), _sha(got or '')))
+    # A REAL keystroke goes to the FRONTMOST app, so raising the window is the mechanism and not a
+    # bug we can fix here. Say so before it happens, because the author is usually mid-sentence in
+    # something else: on 2026-09-14 this raise took three characters of Eric's typing ("fix") into a
+    # live Substack compose, where only the fidelity digest found them. The carrier + synthetic
+    # paste needs no keystroke and no raise -- prefer it (publish SKILL.md, Transport).
+    print('md_to_clipboard: RAISING %s to send a real Cmd-V — this steals focus, and anything you '
+          'type in the next moment lands in the document. Prefer the window.name carrier + '
+          'synthetic paste, which needs neither.' % app, file=sys.stderr)
     press_paste(app)
     time.sleep(0.3)
-    print('pasted %s into %s (%s) — %d chars sha256=%s; the lease is released. Post-check in the '
-          'editor now.' % (label, app, url, len(expected), _sha(expected)))
+    print('pasted %s into %s (%s) — %d chars sha256=%s; the lease is released. NOW COUNT THE TOP '
+          'NODES against the converter\'s own counts — a raised window can have taken a stray '
+          'keystroke into the doc, and only the digest sees it.'
+          % (label, app, url, len(expected), _sha(expected)))
 
 
 def verify_only(piece_dir):
