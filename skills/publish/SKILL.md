@@ -1085,6 +1085,48 @@ granting itself one.
 Don't hand-write the carrier page: a transport that is reassembled from memory each time is a
 transport whose hash check eventually goes missing.
 
+**PROBE THE SERVER IMMEDIATELY BEFORE EVERY CARRY. This is not belt-and-braces; it is the step
+whose absence invents facts about the destination.** `pane_carry.py` is reaped when the shell that
+started it ends, and a dead server makes `carry.html` fetch nothing and set `window.name` to
+nothing — which, read from inside the destination page, is **indistinguishable from a page that
+wipes `window.name`**. Measured 2026-09-14 publishing to LinkedIn: three carries in a row came back
+as 0 chars and produced a confident, written-down, entirely false finding ("LinkedIn's article
+editor clears `window.name` at any size", with a ceiling apparently between 19 KB and 3.5 KB). With
+the server verified up, **2.54 MB carried through the same navigation into the same editor** and
+read back with its hash matching. One `curl` would have prevented all of it:
+
+    curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<port>/<file>   # expect 200
+
+The port rule already says to hash the bytes that came back; extend it by one notch — **check that
+any bytes came back at all.** And when a carry fails, suspect the helper before the remote system:
+a localhost process that dies silently produces failures shaped exactly like the remote's behaviour.
+
+### LinkedIn Articles — what is true about images, measured 2026-09-14
+
+The Article editor is Tiptap/ProseMirror at `/article/edit/<id>/`, so the carrier and the synthetic
+paste work there unchanged. Its schema names are its own: `inlineImage` (attrs `src`, `alt`, `urn`),
+wrapped by `figureImage` with a `figcaption`, plus an `imagePlaceholder` used during upload.
+
+- **An external `src` does NOT survive a save.** Four `inlineImage` nodes pointed at an already-live
+  CDN rendered correctly in the editor and were **gone after a reload**. LinkedIn keeps only assets
+  it hosts, so "reference the URL you already uploaded" — which is right for Substack — is wrong here.
+- **Paste the `data:` URI; that is the path that works.** A synthetic `paste` of
+  `<img src="data:…">` at the slot becomes an `imagePlaceholder`, LinkedIn uploads it, and it
+  resolves to a `figureImage` that survives a reload. **`insertContentAt` with the same HTML inserts
+  nothing and reports success** — count the nodes, never trust the report.
+- **`md_to_linkedin.py` DOES emit a slot per figure**, reading `[Figure N — upload here] <alt>`.
+  A slot carries its whole alt text, so it is **hundreds of characters long**; a search that filters
+  for short paragraphs will not find it and will conclude there are no slots. Delete the slot
+  paragraph after its figure is in, and assert zero `[Figure … upload here]` remain.
+- **The paste drops the alt**, so set it afterwards on the inner `inlineImage` — and only after
+  asserting each figure sits before its own anchor paragraph, or a misplaced figure gets the right
+  alt and looks correct.
+- **The announcing-post field in the publish dialog is a QUILL editor** (`.ql-editor`), not Tiptap.
+  A synthetic paste leaves it empty. Focus it, select its contents, and
+  `document.execCommand('insertText', false, text)`. Then **read it back and hash it against
+  `linkedin-post.md`** before clicking Publish: the outlet rule is that the author approves the
+  exact text, so the exact text is what has to be proven present.
+
 ### The measurement, so nobody has to repeat it
 
 **Fresh compose, from the pane, 2026-09-10.** *A Mother Bird Over the Deep* (54 body blocks, 12
