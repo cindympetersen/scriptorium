@@ -5011,6 +5011,89 @@ def unit_tags(tmp):
 
 
 
+# ---------------------------------------------------------------- unit: publication ownership
+def unit_publication_ownership(tmp):
+    """Ownership both ways, projects, house files, and a publication's deity conventions (2026-09-15).
+
+    The registry listed which voices a publication owned, and nothing on the voice's side said so:
+    a style registered to neither publication passed, a piece naming the other publication's voice
+    was a note, and the devotional publication's house conventions sat in the desk's CLAUDE.md where
+    the professional one inherited them, its essays swept for deity casing by the pronoun gate."""
+    print("\n-- publications: styles and projects owned both ways, house files, deity sections --")
+    import publications as pb
+    import check_pronouns as cp
+    root = os.path.join(tmp, 'owndesk')
+    for d in ('publishing', 'styles/voice-a', 'styles/voice-b', 'books/proj-a', 'books/novel-a',
+              'pieces/pa', 'pieces/pb'):
+        os.makedirs(os.path.join(root, d), exist_ok=True)
+    reg = os.path.join(root, 'publishing', 'publications.yaml')
+    base = ('publications:\n  a:\n    name: A\n    outlets: [site-a]\n    styles: [voice-a]\n'
+            '    projects: [proj-a, novel-a]\n    deity_conventions: true\n'
+            '  b:\n    name: B\n    outlets: [site-b]\n    styles: [voice-b]\n')
+    open(reg, 'w').write(base)
+    open(os.path.join(root, 'styles/voice-a/config.yaml'), 'w').write('publication: a\nformality: 2\n')
+    open(os.path.join(root, 'styles/voice-b/config.yaml'), 'w').write('formality: 3\n')
+    open(os.path.join(root, 'pieces/pa/publish.yaml'), 'w').write('title: PA\npublication: a\n')
+    open(os.path.join(root, 'pieces/pa/README.md'), 'w').write('# PA\n[v](../../styles/voice-a/) [p](../../books/proj-a/)\n')
+    open(os.path.join(root, 'pieces/pb/publish.yaml'), 'w').write('title: PB\npublication: b\n')
+    open(os.path.join(root, 'pieces/pb/README.md'), 'w').write('# PB\n[v](../../styles/voice-a/)\n')
+    pubs, probs = pb.load(root)
+    check('own: projects load, with the house file at its default path', not probs
+          and pubs['a']['projects'] == ['proj-a', 'novel-a']
+          and pubs['a']['house'].endswith(os.path.join('publishing', 'house', 'a.md'))
+          and pubs['a']['deity_conventions'] and not pubs['b']['deity_conventions'], str(probs))
+    problems, _n, _c = pb.check(root, pubs)
+    check("own: a style whose config names no publication fails",
+          any('styles/voice-b/config.yaml' in x and 'names no publication' in x for x in problems), str(problems))
+    check("own: a piece naming another publication's voice FAILS, and says whose it is",
+          any(x.startswith('pb:') and "voice-a" in x and "a's" in x for x in problems), str(problems))
+    open(os.path.join(root, 'styles/voice-b/config.yaml'), 'w').write('publication: a\n')
+    open(os.path.join(root, 'pieces/pb/README.md'), 'w').write('# PB\n[v](../../styles/voice-b/)\n')
+    os.makedirs(os.path.join(root, 'styles/stray'), exist_ok=True)
+    os.makedirs(os.path.join(root, 'books/orphan'), exist_ok=True)
+    problems, _n, _c = pb.check(root, pubs)
+    check('own: a config that disagrees with the registry fails',
+          any("names publication 'a', but b owns it" in x for x in problems), str(problems))
+    check('own: an unowned style and an unowned project both fail',
+          any(x.startswith('styles/stray:') for x in problems)
+          and any(x.startswith('books/orphan:') for x in problems), str(problems))
+    open(os.path.join(root, 'styles/voice-b/config.yaml'), 'w').write('publication: b\n')
+    os.rmdir(os.path.join(root, 'styles/stray')); os.rmdir(os.path.join(root, 'books/orphan'))
+    problems, _n, _c = pb.check(root, pubs)
+    check('own: the desk is clean once every voice and project is owned both ways', not problems, str(problems))
+    open(reg, 'w').write(base.replace('    styles: [voice-b]\n', '    styles: [voice-b, voice-a]\n'))
+    check('own: one style owned by two publications is a registry problem',
+          any("style 'voice-a' belongs to both a and b" in x for x in pb.load(root)[1]), str(pb.load(root)[1]))
+    open(reg, 'w').write(base.replace('projects:', 'books:'))
+    check('own: `books:` still reads as the older name of `projects:`',
+          pb.load(root)[0]['a']['projects'] == ['proj-a', 'novel-a'])
+    open(reg, 'w').write(base)
+    import io, contextlib
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = pb.main(['--root', root, 'context', 'pa'])
+    check('own: context names the publication, a missing house file as none, the project and the style',
+          rc == 0 and 'publication: a' in out.getvalue() and '(none' in out.getvalue()
+          and 'books/proj-a' in out.getvalue() and 'styles/voice-a' in out.getvalue(), out.getvalue())
+    os.makedirs(os.path.join(root, 'publishing', 'house'), exist_ok=True)
+    open(os.path.join(root, 'publishing', 'house', 'a.md'), 'w').write('# House A\n')
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        pb.main(['--root', root, 'context', 'pa'])
+    check('own: context names a house file once it exists', 'publishing/house/a.md' in out.getvalue(), out.getvalue())
+    check('own: deity conventions follow the publication; no registry stays strict',
+          pb.deity_conventions(os.path.join(root, 'pieces', 'pa'))
+          and not pb.deity_conventions(os.path.join(root, 'pieces', 'pb'))
+          and pb.deity_conventions(os.path.join(tmp, 'no-such-desk', 'pieces', 'x')))
+    body = '# PB\n*Draft.*\n\n---\n\nThe choir sang to the Lord. A man walked in and he sat down.\n'
+    open(os.path.join(root, 'pieces/pb/draft.md'), 'w').write(body)
+    r = subprocess.run([sys.executable, os.path.join(HERE, 'check_pronouns.py'),
+                        os.path.join(root, 'pieces', 'pb')], capture_output=True, text=True, cwd=root)
+    check("own: check_pronouns skips the deity sections for a publication without them, and keeps B",
+          'not asked' in r.stdout and 'G. mixed-case *Lord* in the body' in r.stdout
+          and re.search(r'G\. .*\(0\):', r.stdout) and not re.search(r'B\. .*\(0;', r.stdout), r.stdout[-600:])
+
+
 # ---------------------------------------------------------------- unit: publications
 def unit_publications(tmp):
     """Two publications on one desk, kept apart (2026-09-11).
@@ -6069,6 +6152,7 @@ def main():
         unit_store(tmp)
         unit_tags(tmp)
         unit_publications(tmp)
+        unit_publication_ownership(tmp)
         unit_substack_tags(tmp)
         unit_linkedin(tmp)
         unit_linkedin_post(tmp)

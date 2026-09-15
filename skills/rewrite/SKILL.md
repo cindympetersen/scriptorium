@@ -19,7 +19,12 @@ under a constitution that has changed. Most of the work is deciding what stays f
    guardrails, consent), `publish.yaml` (is it live? which footnotes are verified?), the `log/`
    (what has been corrected on the page since it published — those corrections are load-bearing
    and must survive), and the ledger entries it rests on (`books/<name>/facts.md` for a
-   witness-anchored piece).
+   witness-anchored piece). And the layers above the voice: `python3 framework/tools/publications.py context <slug>` names the text's publication, its
+   **house file** (`publishing/house/<publication>.md`), its **project** (`books/<name>/`) and its
+   style. Load the house file and the project's README/brief with the style: the house file holds
+   the conventions every voice of that publication keeps, and the desk's `CLAUDE.md` does not carry
+   them. No house file means the publication keeps none beyond the desk's — never borrow another
+   publication's. (2026-09-15.)
 2. **Read what changed in the voice.** `git log` on `styles/<voice>/style.md` and `config.yaml`
    since the piece's last version, and the `corrections.md` entries in that window. The rewrite is
    *for* those changes; name them to yourself before you touch a sentence. A rule that postdates the

@@ -124,6 +124,11 @@ Rules of thumb:
 
 - **Name the family by the publication, the voice by its job** — `being-good-journal`,
   `being-good-essay`. Siblings read as siblings.
+- **On a desk with several publications, a voice names its owner** — `publication: <id>` in
+  `config.yaml` — and the registry lists it back. `publications.py check` fails a voice no
+  publication owns, a config that disagrees with the registry, and a piece that names another
+  publication's voice. A rule every voice of the publication keeps goes in its **house file**
+  (`publishing/house/<publication>.md`, see PUBLICATIONS.md), not copied into each constitution.
 - **Each text picks exactly one.** Never blend two voices in a single text; if a piece
   seems to need both, it's probably two pieces — or a piece and a **companion** (a Note, a
   talk), which is a text of its own and names its own voice. See

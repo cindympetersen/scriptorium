@@ -54,11 +54,15 @@ A style is structured context that steers a draft — never model weights.
   outlets that reach it. They are registered in `publishing/publications.yaml`, and **every piece
   names its one** in `publish.yaml` (`publication: <id>`; `tools/publications.py assign` writes
   it). A piece never spans two: the same argument for two audiences is two pieces.
-- **Kept apart per publication:** outlets (each has one owner), styles, books, and **tags** — each
-  publication has its own vocabulary. The content store is shared, so a slug belongs to one
+- **Kept apart per publication:** outlets, styles, **projects** (`books/<name>/`) — each has one
+  owner — **tags** (each publication has its own vocabulary) and **house rules**
+  (`publishing/house/<publication>.md`). The content store is shared, so a slug belongs to one
   publication, and the tools refuse a crossing rather than overwrite.
+- **What governs a text, most general first: the desk's `CLAUDE.md` → its publication's house file →
+  its project → its style.** Keep a publication's conventions out of the desk's `CLAUDE.md`: every
+  text on the desk reads it. `publications.py context <slug>` names the layers for one text.
 - `python3 framework/tools/publications.py check` — every manifest names a publication and owns
-  its outlets. **A one-publication desk needs no registry**; add it with the second publication.
+  its outlets; every style and project has one owner, and a style's `config.yaml` names it back. **A one-publication desk needs no registry**; add it with the second publication.
   See `docs/PUBLICATIONS.md`.
 
 ## Working alongside other sessions

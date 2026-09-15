@@ -12,7 +12,12 @@ the loop — write freely, revise later, let git remember old versions.
 
 1. Identify the **piece** and its **target style** from `pieces/<name>/README.md`
    (the `Style:` line). If the piece or style is ambiguous, ask — don't guess a
-   voice.
+   voice. Then the layers above the style: `python3 framework/tools/publications.py context <slug>` names the text's publication, its
+   **house file** (`publishing/house/<publication>.md`), its **project** (`books/<name>/`) and its
+   style. Load the house file and the project's README/brief with the style: the house file holds
+   the conventions every voice of that publication keeps, and the desk's `CLAUDE.md` does not carry
+   them. No house file means the publication keeps none beyond the desk's — never borrow another
+   publication's. (2026-09-15.)
 1a. **When the piece is NEW, settle its outlets before drafting, and confirm them with
    the author.** A piece declares where it will be published in `publish.yaml`:
 
@@ -110,7 +115,9 @@ app's session list then reads as a shelf of pieces instead of a row of identical
    naming its referent. (Added 2026-09-03 — see the constitution's pronoun section and
    `corrections.md`; E and F added 2026-09-07 after *False Light* carried four such misses; H added
    2026-09-10 after *They Them* shipped two reflexives live; the form settled on *Themselves*
-   2026-09-11, Eric's call, five uses swept.)
+   2026-09-11, Eric's call, five uses swept.) **The deity sections (A, C–H) are a house convention,
+   not the desk's:** the tool asks them only of a publication with `deity_conventions: true` and
+   says so when it skips them; B and I hold for every text.
 1. Append a dated entry to `pieces/<name>/log/<current-month>.md` — what you
    drafted, decisions, open threads. Append-only, newest at the bottom.
 2. Update `pieces/<name>/README.md` — the `Stage:` and `Next move:` lines.

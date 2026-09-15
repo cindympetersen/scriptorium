@@ -570,8 +570,22 @@ def main():
         i = sys.argv.index('--names'); names = [n.strip() for n in sys.argv[i+1].split(',')]
     strict = '--strict' in sys.argv
     r = sweep(piece, names)
+    # The deity sections (A, C–H) are one publication's house conventions, not the desk's
+    # (2026-09-15): a registry entry without `deity_conventions: true` is not asked them. B and I —
+    # an invented person is they/them, a creature is a who — hold for every text.
+    deity = True
+    try:
+        import publications
+        deity = publications.deity_conventions(piece)
+    except Exception:                                   # noqa: BLE001 — no registry tool: stay strict
+        pass
+    if not deity:
+        for k in 'ACDEFGH':
+            r[k] = []
     A, B, C, D, E, F, G, H, I = (r[k] for k in 'ABCDEFGHI')
     print(f"check_pronouns — {os.path.basename(piece)}: {r['sentences']} sentences")
+    if not deity:
+        print("   (its publication keeps no deity conventions: sections A and C–H are not asked)")
     print(f"\nA. a sentence-initial capital that READS AS DEITY but points at a person ({len(A)}):")
     for w, why, c in A: print(f"   {w:5s} {why:52s} {_clip(c,120)}")
     print(f"\nB. masculine / 'a man' to justify ({len(B)}; {sum(1 for t,_,_ in B if t.startswith('GENERIC'))} unexplained):")

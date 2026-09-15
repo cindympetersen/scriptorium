@@ -15,9 +15,14 @@ So a publication is a thing the desk names, in one registry, and each piece name
         name: Being Good              # what a reader subscribes to
         byline: E.L. Muffin
         outlets: [substack, alignmentfellowship]   # every outlet belongs to ONE publication
-        books: [being-good]           # the books whose pieces it publishes
+        projects: [being-good, all-my-stories]     # books/<name>/ — the long projects it holds
         styles: [being-good-essay, being-good-journal]   # the voices it speaks in
-        # tags: publishing/tags/being-good.yaml    # its tag vocabulary; this is the default
+        deity_conventions: true       # check_pronouns' deity sections apply to its texts
+        # tags:  publishing/tags/being-good.yaml   # its tag vocabulary; this is the default
+        # house: publishing/house/being-good.md    # its house rules; this is the default
+
+    # styles/<name>/config.yaml
+    publication: being-good           # the voice names its owner back; check holds the two equal
 
     # pieces/<slug>/publish.yaml
     publication: being-good
@@ -31,12 +36,21 @@ WHAT `check` HOLDS, once the registry exists:
     outlet shared by two publications is a site showing both.
   * every manifest names a publication the registry defines.
   * every outlet a piece declares belongs to that publication.
-  * (notes, not failures) a README whose style or book is not one its publication lists, and
-    an outlet in outlets.yaml that no publication owns.
+  * OWNERSHIP BOTH WAYS (2026-09-15). Every style directory and every project directory
+    (books/<name>/) belongs to exactly one publication, and a style's config.yaml names that
+    same publication back. A text whose README names a style or a project is failed when its
+    publication does not own it — one publication's voice cannot draft the other's piece.
+  * (a note, not a failure) an outlet in outlets.yaml that no publication owns.
+
+LAYERS. A text is governed, most general first, by the desk (CLAUDE.md), its publication's
+HOUSE file (house conventions: casing, links, what a quotation may say), its project
+(books/<name>/ — README, brief, a CLAUDE.md of its own), and its style. `context` prints
+the three paths below the desk for one text, so a skill loads them instead of guessing.
 
 USAGE
     publications.py list
     publications.py show <piece>
+    publications.py context <piece>                  # publication, house file, project, style
     publications.py assign <piece> <publication>     # writes `publication:` into publish.yaml
     publications.py check [--outlets publishing/outlets.yaml]
 
@@ -161,8 +175,8 @@ def registry_path(root, explicit=None):
 
 def load(root, explicit=None):
     """-> (publications, problems). publications is None when the desk has no registry — a
-    one-publication desk — and otherwise id -> {name, byline, outlets, required_outlets, books,
-    styles, tags}."""
+    one-publication desk — and otherwise id -> {name, byline, outlets, required_outlets, projects,
+    styles, deity_conventions, tags, house}. `books:` is read as the older name of `projects:`."""
     path = registry_path(root, explicit)
     if not os.path.exists(path):
         if explicit:
@@ -183,8 +197,11 @@ def load(root, explicit=None):
         if not isinstance(e, dict) or not str(e.get('name') or '').strip():
             problems.append(f'{pid}: needs a name'); continue
         entry = {'name': str(e['name']).strip(), 'byline': str(e.get('byline') or '').strip()}
-        for field in ('outlets', 'books', 'styles'):
-            v = e.get(field) or []
+        if 'books' in e and 'projects' in e:
+            problems.append(f'{pid}: names both books and projects — projects is the one field')
+        for field in ('outlets', 'projects', 'styles'):
+            v = e.get(field) if field != 'projects' or 'projects' in e else e.get('books')
+            v = v or []
             if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
                 problems.append(f'{pid}: {field} must be a list of names'); v = []
             entry[field] = list(v)
@@ -193,6 +210,16 @@ def load(root, explicit=None):
                 problems.append(f'outlet {o!r} belongs to both {owner[o]} and {pid} — a site reads '
                                 f'by outlet, so it would show both publications')
             owner.setdefault(o, pid)
+        for field, what in (('styles', 'style'), ('projects', 'project')):
+            for x in entry[field]:
+                k = (field, x)
+                if k in owner:
+                    problems.append(f'{what} {x!r} belongs to both {owner[k]} and {pid}')
+                owner.setdefault(k, pid)
+        dc = e.get('deity_conventions', False)
+        if not isinstance(dc, bool):
+            problems.append(f'{pid}: deity_conventions must be true or false'); dc = False
+        entry['deity_conventions'] = dc
         # Outlets EVERY published piece of this publication must be on, unless the piece records
         # why not. Optional; a publication without it asks nothing.
         req = e.get('required_outlets') or []
@@ -215,6 +242,9 @@ def load(root, explicit=None):
         t = e.get('tags')
         entry['tags'] = os.path.join(root, t) if isinstance(t, str) and t.strip() else \
             os.path.join(root, 'publishing', 'tags', f'{pid}.yaml')
+        h = e.get('house')
+        entry['house'] = os.path.join(root, h) if isinstance(h, str) and h.strip() else \
+            os.path.join(root, 'publishing', 'house', f'{pid}.md')
         pubs[pid] = entry
     return pubs, problems
 
@@ -306,6 +336,46 @@ def outlet_owner(pubs, outlet):
     return next((p for p, e in (pubs or {}).items() if outlet in e['outlets']), None)
 
 
+def owner_of(pubs, field, name):
+    """The publication whose `field` ('styles' or 'projects') lists `name`, or None."""
+    return next((p for p, e in (pubs or {}).items() if name in e[field]), None)
+
+
+def style_publication(root, style):
+    """-> the `publication:` a style's config.yaml names back, '' when it names none, or None
+    when the style has no config.yaml."""
+    path = os.path.join(root, 'styles', style, 'config.yaml')
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding='utf-8') as fh:
+            doc = yaml.safe_load(fh) or {}
+    except yaml.YAMLError:
+        return ''
+    return str(doc.get('publication') or '') if isinstance(doc, dict) else ''
+
+
+def _dirs(root, name):
+    d = os.path.join(root, name)
+    return sorted(x for x in os.listdir(d) if os.path.isdir(os.path.join(d, x))
+                  and not x.startswith('.')) if os.path.isdir(d) else []
+
+
+def deity_conventions(text_dir):
+    """Do the deity-pronoun conventions apply to this text? True on a desk with no registry and
+    for a text whose publication cannot be read — the strict answer when the question has none."""
+    root = instance_root(text_dir)
+    try:
+        pubs, _p = load(root)
+        man = read_manifest(text_dir)
+    except Exception:                                   # noqa: BLE001 — unreadable: stay strict
+        return True
+    if not pubs or not man:
+        return True
+    e = pubs.get(man.get('publication') or '')
+    return True if e is None else e['deity_conventions']
+
+
 def of_piece(man, pubs):
     """-> (publication id or None, problems). No registry: (None, []) — nothing is asked."""
     if pubs is None or man is None:
@@ -337,8 +407,30 @@ def readme_refs(pdir):
 
 def check(root, pubs, outlets_file=None):
     """-> (problems, notes, counts). A problem fails the check; a note is worth knowing."""
+    import corpus
     problems, notes, counts = [], [], {p: 0 for p in pubs}
-    for slug, d in pieces(root):
+    # Ownership both ways: what is on disk is owned, what is owned is on disk, and a style
+    # names its owner back. Only a desk that HAS styles/ or books/ is asked.
+    for field, top, what in (('styles', 'styles', 'style'), ('projects', 'books', 'project')):
+        if not os.path.isdir(os.path.join(root, top)):
+            continue
+        present = _dirs(root, top)
+        for x in present:
+            if not owner_of(pubs, field, x):
+                problems.append(f'{top}/{x}: no publication owns this {what} '
+                                f'(add it to {field} in publications.yaml)')
+        for p, e in pubs.items():
+            for x in e[field]:
+                if x not in present:
+                    problems.append(f'{p}: {what} {x!r} is not a directory under {top}/')
+    for x in _dirs(root, 'styles'):
+        owner, named = owner_of(pubs, 'styles', x), style_publication(root, x)
+        if owner and named is not None and named != owner:
+            problems.append(f'styles/{x}/config.yaml: ' + (
+                f'names publication {named!r}, but {owner} owns it' if named else
+                f'names no publication (publication: {owner})'))
+    for slug, d, kind in corpus.texts(root):
+        slug = slug if kind == 'piece' else f'talks/{slug}'
         try:
             man = read_manifest(d)
         except yaml.YAMLError:
@@ -351,10 +443,14 @@ def check(root, pubs, outlets_file=None):
             continue
         counts[pid] += 1
         style, book = readme_refs(d)
-        if style and pubs[pid]['styles'] and style not in pubs[pid]['styles']:
-            notes.append(f"{slug}: README's style {style!r} is not one {pid} lists")
-        if book and pubs[pid]['books'] and book not in pubs[pid]['books']:
-            notes.append(f"{slug}: README's book {book!r} is not one {pid} lists")
+        if style and style not in pubs[pid]['styles']:
+            problems.append(f"{slug}: README's style {style!r} is not one {pid} owns"
+                            + (f' — it is {owner_of(pubs, "styles", style)}\'s'
+                               if owner_of(pubs, 'styles', style) else ''))
+        if book and book not in pubs[pid]['projects']:
+            problems.append(f"{slug}: README's project books/{book} is not one {pid} owns"
+                            + (f' — it is {owner_of(pubs, "projects", book)}\'s'
+                               if owner_of(pubs, 'projects', book) else ''))
     if outlets_file and os.path.exists(outlets_file):
         with open(outlets_file, encoding='utf-8') as fh:
             defined = set(((yaml.safe_load(fh) or {}).get('outlets') or {}).keys())
@@ -417,6 +513,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest='cmd', required=True)
     sub.add_parser('list')
     p = sub.add_parser('show'); p.add_argument('piece')
+    p = sub.add_parser('context'); p.add_argument('piece')
     p = sub.add_parser('assign'); p.add_argument('piece'); p.add_argument('publication')
     p.add_argument('--move', action='store_true',
                    help='re-assign a piece that already names a different publication')
@@ -460,9 +557,12 @@ def _dispatch(a, root, pubs, reg_problems):
         _p, _n, counts = check(root, pubs)
         for pid, e in pubs.items():
             print(f"{pid:18} {e['name']}" + (f" — {e['byline']}" if e['byline'] else ''))
-            print(f"{'':18} outlets: {', '.join(e['outlets']) or '-'}   books: {', '.join(e['books']) or '-'}")
+            print(f"{'':18} outlets: {', '.join(e['outlets']) or '-'}   projects: {', '.join(e['projects']) or '-'}")
             print(f"{'':18} styles: {', '.join(e['styles']) or '-'}   tags: {os.path.relpath(e['tags'], root)}"
                   f"   pieces: {counts[pid]}")
+            print(f"{'':18} house: {os.path.relpath(e['house'], root)}"
+                  + ('' if os.path.exists(e['house']) else ' (none written)')
+                  + f"   deity conventions: {'yes' if e['deity_conventions'] else 'no'}")
         return 0
 
     d = piece_dir(root, a.piece)
@@ -470,6 +570,22 @@ def _dispatch(a, root, pubs, reg_problems):
     if a.cmd == 'show':
         pid, probs = of_piece(read_manifest(d), pubs)
         print(f"{slug}: {pid or '(none)'}" + ''.join(f'\n  {p}' for p in probs))
+        return 0
+    if a.cmd == 'context':
+        # What governs this text below the desk — the files a drafting or reviewing skill loads.
+        pid, probs = of_piece(read_manifest(d), pubs)
+        style, book = readme_refs(d)
+        rel = lambda x: os.path.relpath(x, root)
+        e = pubs.get(pid) or {}
+        house = e.get('house')
+        print(f"publication: {pid or '(none)'}" + (f"   ({e['name']})" if e else ''))
+        print(f"house:       " + (rel(house) if house and os.path.exists(house) else
+                                  '(none — this publication keeps no house rules beyond the desk)'))
+        print(f"project:     " + (rel(os.path.join(root, 'books', book)) if book else '(none)'))
+        print(f"style:       " + (rel(os.path.join(root, 'styles', style)) if style else '(none named in README)'))
+        print(f"deity conventions: {'yes' if (e.get('deity_conventions') if e else True) else 'no'}")
+        for p in probs:
+            print(f'  note  {p}')
         return 0
 
     if a.publication not in pubs:

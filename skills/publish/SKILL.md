@@ -140,8 +140,12 @@ glitchy char-by-char editor typing with one paste + one footnote pass.
   `setup-token` session cannot use the extension at all), and `claude --chrome`. Verify with
   `/chrome` — **Status: Enabled**, **Extension: Installed**. If the user is missing it, **say so
   and stop**; do not quietly fall back to retyping the essay.
-- Publication specifics and defaults live in the **instance** (e.g. `publishing/substack.md`),
-  never in this framework skill.
+- Publication specifics and defaults live in the **instance**, never in this framework skill.
+  A desk can carry several publications, each with its own outlets: read the piece's
+  `publication:` and `outlets:`, then each outlet's notes (on this framework's reference desk,
+  `publishing/substack.md` holds the rules for **every** Substack outlet and a second Substack
+  publication's identity sits in its own file beside it). `publications.py context <slug>` names
+  the publication's **house file**; the preflight holds the draft to it as it does to the style.
 
 ## Name the session after the piece
 
