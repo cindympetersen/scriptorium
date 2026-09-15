@@ -4,19 +4,26 @@ Scriptorium is the framework. Your writing lives in a *separate private repo*
 that mounts scriptorium as a submodule. The fastest path is the scaffolding tool;
 the manual steps are below it so you can see what it does.
 
-## The one-liner
+## Fork first, then the one-liner
+
+Fork `github.com/muffin-labs/scriptorium` to your account. Your desk mounts **your fork**, so the
+framework is yours to tune and Claude Code can change it from inside the desk; upstream is a
+remote you pull from. Then, from anywhere:
 
 ```bash
-# from anywhere; point it at where you want your desk
-path/to/scriptorium/tools/new-desk ~/code/writing-desk
+git clone git@github.com:YOU/scriptorium.git
+scriptorium/tools/new-desk ~/code/writing-desk --framework git@github.com:YOU/scriptorium.git
 ```
 
-By default the new desk mounts scriptorium from its public URL. To develop
-against a **local** scriptorium checkout (before it's pushed anywhere), pass it:
+`--framework` also takes a **local** checkout, for developing against a scriptorium that is not
+pushed anywhere yet:
 
 ```bash
 tools/new-desk ~/code/writing-desk --framework /Users/you/code/scriptorium
 ```
+
+Without `--framework` the desk mounts upstream directly and `new-desk` says so; that desk has
+nowhere to push its own framework changes.
 
 The new desk comes with CI, from `framework/templates/desk/`: `.github/workflows/tests.yml` runs
 the suite against your pieces on every push to GitHub, and `.githooks/pre-push` runs the same
@@ -47,7 +54,8 @@ git init
 ### 2. Scriptorium as a submodule
 
 ```bash
-git submodule add https://github.com/<you>/scriptorium.git framework
+git submodule add git@github.com:<you>/scriptorium.git framework   # your fork
+git -C framework remote add upstream https://github.com/muffin-labs/scriptorium.git
 git commit -m "Add scriptorium framework submodule"
 ```
 

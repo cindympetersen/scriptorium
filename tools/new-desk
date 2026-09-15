@@ -6,9 +6,11 @@
 #   new-desk <dest> [--framework <url|path>] [--style <name>]
 #
 #   <dest>              Where to create the instance (e.g. ~/code/writing-desk).
-#   --framework <ref>   Submodule source for the framework. Defaults to the public
-#                       URL. For local development before scriptorium is pushed,
-#                       pass the path to your local checkout.
+#   --framework <ref>   Submodule source for the framework — YOUR FORK, normally
+#                       (git@github.com:you/scriptorium.git), so the framework is
+#                       yours to tune and the desk has somewhere to push framework
+#                       changes. A local checkout path also works, for development
+#                       before it is pushed. Defaults to upstream, and says so.
 #   --style <name>      Starter style to copy in as your first voice. Default:
 #                       plain-english (copied to styles/my-voice).
 #
@@ -20,7 +22,9 @@
 
 set -euo pipefail
 
+UPSTREAM_URL="https://github.com/muffin-labs/scriptorium.git"
 FRAMEWORK_URL="git@github.com:muffin-labs/scriptorium.git"
+FRAMEWORK_GIVEN=0
 STARTER_STYLE="plain-english"
 SKILLS=(draft critique style-audit tune-style whats-on-the-desk)
 
@@ -29,7 +33,7 @@ die() { printf 'new-desk: %s\n' "$1" >&2; exit 1; }
 DEST=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --framework) FRAMEWORK_URL="${2:?--framework needs a value}"; shift 2 ;;
+    --framework) FRAMEWORK_URL="${2:?--framework needs a value}"; FRAMEWORK_GIVEN=1; shift 2 ;;
     --style)     STARTER_STYLE="${2:?--style needs a value}"; shift 2 ;;
     -h|--help)   sed -n '2,20p' "$0"; exit 0 ;;
     -*)          die "unknown option: $1" ;;
@@ -62,6 +66,17 @@ echo "==> adding scriptorium as a submodule ($FRAMEWORK_URL)"
 # one command rather than changing the user's global git config.
 git -c protocol.file.allow=always submodule add -q "$FRAMEWORK_URL" framework \
   || die "submodule add failed. If scriptorium isn't pushed yet, pass --framework <local path>."
+# The framework is meant to be a FORK: upstream stays reachable as a second remote inside the
+# submodule, so `git -C framework pull upstream main` brings in what changed there, and your own
+# framework commits go to `origin` (your fork). A desk mounting upstream directly is told so.
+if [ "$FRAMEWORK_GIVEN" = 1 ] && [ "$FRAMEWORK_URL" != "$UPSTREAM_URL" ] \
+   && [ "$FRAMEWORK_URL" != "git@github.com:muffin-labs/scriptorium.git" ]; then
+  git -C framework remote add upstream "$UPSTREAM_URL" 2>/dev/null || true
+  echo "    framework/ is your fork; 'upstream' points at muffin-labs/scriptorium"
+else
+  echo "    NOTE: framework/ mounts upstream directly. Fork github.com/muffin-labs/scriptorium and"
+  echo "    pass --framework git@github.com:YOU/scriptorium.git so your framework changes have a home."
+fi
 
 echo "==> wiring shared skills"
 mkdir -p .claude/skills

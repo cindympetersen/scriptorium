@@ -164,12 +164,36 @@ Issues and pull requests welcome. The same goes for other publishing targets —
 written against Substack because that is what this desk publishes to, not because the model is
 Substack-shaped.
 
-## Adopt it
+## Adopt it — fork first
 
-See [docs/SETUP.md](docs/SETUP.md), or just run the scaffolding tool:
+**The default path is a fork, not a clone.** Your desk mounts *your* fork of this repo as its
+`framework/` submodule, so the framework is yours to tune as you write — and Claude Code, working
+in your desk, can change skills, tools and templates in `framework/` as it goes, commit there, and
+push to your fork. Upstream stays a remote you pull from when you want what changed here, and a
+place to send back what is worth sharing. A desk that mounts upstream directly has nowhere to put
+its own framework changes, which is how a tuned skill ends up as an uncommitted diff.
 
 ```bash
-tools/new-desk ~/code/writing-desk
+# 1. fork github.com/muffin-labs/scriptorium to your account (the Fork button), then
+git clone git@github.com:YOU/scriptorium.git
+scriptorium/tools/new-desk ~/code/writing-desk --framework git@github.com:YOU/scriptorium.git
+```
+
+`new-desk` mounts the fork at `framework/`, adds `upstream` (this repo) as a second remote inside
+it, wires the shared skills, copies a starter style to tune, scaffolds a first piece, and makes the
+initial commit. [docs/SETUP.md](docs/SETUP.md) walks through what it does by hand.
+
+**Working on the framework from inside the desk:**
+
+```bash
+cd ~/code/writing-desk/framework
+git switch main                       # the submodule is on a branch, not a detached HEAD
+# …edit a skill, a tool, a template…
+git commit -m "…" -- <paths>          # commit by path (the desk's index is shared)
+git push origin main                  # your fork
+cd .. && git commit -m "framework: …" -- framework   # bump the pointer in the desk
+
+git -C framework pull upstream main   # when you want upstream's changes
 ```
 
 The new desk comes with CI, from `templates/desk/`: `.github/workflows/tests.yml` runs the suite
@@ -189,6 +213,15 @@ runs `tools/ci_check.py` — the same command CI runs — on an export of exactl
 pushed, and refuses the push if it is red. A desk push whose framework pointer is not yet on the
 framework's `origin/main` is refused too: push the framework first. Don't bypass it with
 `git push --no-verify`.
+
+## Versioning
+
+Semantic versioning. The version is in [`VERSION`](VERSION), every release is a tag `vX.Y.Z` on
+`main` with a GitHub release, and [`CHANGELOG.md`](CHANGELOG.md) says what each one changed and
+which number moved and why: **MAJOR** when a desk has to change to keep working, **MINOR** when a
+desk can adopt or ignore it, **PATCH** for a fix that changes no interface. A desk pins the
+framework by submodule commit, so a tag is a name a desk can move to on purpose. Any change a desk
+would notice adds a line under *Unreleased* in the same commit.
 
 ## What's inside
 

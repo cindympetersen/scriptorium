@@ -144,6 +144,20 @@ landed on shared singletons**, so those are the things with rules.
   the framework first. A new third-party import goes into `framework/requirements-ci.txt` in the
   same commit, or CI and the hook both go red.
 
+## The framework is a fork, and it is versioned
+
+- `framework/` is normally the author's **fork** of scriptorium, on `main`, with `upstream`
+  as a second remote. Framework changes made while working on a piece are committed **in
+  `framework/`, by path**, pushed to the fork, and the pointer bumped in the desk; pull
+  `upstream main` when the author wants what changed there. Never leave a framework change
+  as an uncommitted diff in the submodule.
+- **Semantic versioning, kept in the same commit.** Any change a desk would notice — a new or
+  changed skill, tool, manifest key, gate, template, or doc that changes what a desk should
+  do — adds a line under *Unreleased* in `framework/CHANGELOG.md`. A release bumps `VERSION`,
+  moves the lines under a version heading, tags `vX.Y.Z`, and publishes the GitHub release
+  with the same text. MAJOR: a desk must change to keep working. MINOR: a desk can adopt or
+  ignore it. PATCH: a fix that changes no interface.
+
 ## Principles
 
 - **Logs are append-only.** Never edit a past writing-log entry — a log you can
