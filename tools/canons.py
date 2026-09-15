@@ -136,8 +136,15 @@ class Canon:
         # because it is anchored to the canon's own name and capped by section_count —
         # an unanchored [IVXL]+ would match the pronoun I.
         num = r"(\d+|[IVXL]+)"
-        tail = rf"{gap}{num}(?:{sep}(\d+))?" if self.depth == 2 else \
-               rf"{gap}{num}{sep}(\d+)(?:\s*[-–—]\s*(\d+))?"
+        # A RANGE IS A RANGE IN EITHER SHAPE. The depth-2 tail captured no end verse, so a
+        # numbered canon could not be cited as `99:7-8` at all: `loci()` read the end as
+        # the start, check_loci checked 99:7 alone, and then told the note to "cite
+        # 99:7-8" — the exact advice it already followed. The King James tail had the
+        # group from the start. (Measured 2026-09-14 on the first Qur'an ranges written
+        # after the canon was indexed: 99:7-8, 16:58-59, 81:8-9, all correctly cited.)
+        rng = r"(?:\s*[-–—]\s*(\d+))?"
+        tail = rf"{gap}{num}(?:{sep}(\d+){rng})?" if self.depth == 2 else \
+               rf"{gap}{num}{sep}(\d+){rng}"
         if self.named:
             names = sorted(set(self.sections) | set(self.aliases), key=len, reverse=True)
             if not names:
@@ -281,7 +288,7 @@ class Canon:
                 if not self.in_range(ch):
                     continue
                 v = int(g[2]) if len(g) > 2 and g[2] else 0
-                end = v
+                end = int(g[3]) if v and len(g) > 3 and g[3] else v
                 if self.verse_resolution:
                     if v:
                         key, label = (self.slug, ch, v), m.group(0)
