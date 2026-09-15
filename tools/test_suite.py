@@ -4009,8 +4009,12 @@ def unit_captions(tmp):
 
     write('cover: assets/hero.png\ncover_caption: What the hero means.\ncaptions:\n  assets/fig.png: The chart.\n')
     _b, _n, images, _m = ml.build(d)
-    check('captions: the LinkedIn figure payloads carry each caption',
-          [i.get('caption') for i in images] == ['What the hero means.', 'The chart.'], str(images))
+    # 2026-09-15: the hero is the Article's COVER, not figure 1 — it leaves `images` for
+    # `guards['cover']`, carrying cover_caption; the body figures keep their captions: entries.
+    check('captions: the LinkedIn hero is the cover, carrying cover_caption',
+          (_m.get('cover') or {}).get('caption') == 'What the hero means.', str(_m.get('cover')))
+    check('captions: the LinkedIn figure payloads carry each caption, hero excluded',
+          [i.get('caption') for i in images] == ['The chart.'], str(images))
 
     tool = os.path.join(HERE, 'substack_captions.py')
     out = os.path.join(tmp, 'caps.js')
