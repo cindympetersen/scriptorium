@@ -565,7 +565,13 @@ def parse_blocks(piece_dir):
     # prose dates a source "(2002)" or "March 10, 1967", never 2026-09-07 — so it refuses on
     # the date shape and on consulted/accessed/retrieved + a date, wherever it is.
     residual = [n for n, c in ordered if re.search(r'verify', c, re.I) or CLEARANCE_RE.search(c)]
-    residual += ['body#%d' % i for i, b in enumerate(out) if CLEARANCE_RE.search(b)]
+    # An image's alt text is exempt: it TRANSCRIBES what is in the picture, verbatim and in
+    # quotation marks (docs/ALT-TEXT.md), and a picture of a ledger or a receipt carries ISO
+    # dates. A transcription is not scaffold — the date is the image's, not the desk's. Found
+    # 2026-09-14 when A Writing Desk That Keeps Its Receipts' hero (a receipt tape of
+    # timestamped commits) refused to compose on the dates its alt had to carry.
+    _no_alt = lambda b: re.sub(r'\salt="[^"]*"', ' alt=""', b)
+    residual += ['body#%d' % i for i, b in enumerate(out) if CLEARANCE_RE.search(_no_alt(b))]
     sources = {'body': out_src, 'fns': [fn_src[n] for n, _c in ordered]}
     return out, ordered, stripped, residual, unverified, fn_issues, sources
 
