@@ -82,7 +82,14 @@ def find(root, ref, prefer='piece'):
     wherever it lives."""
     if os.sep in ref.rstrip(os.sep) or os.path.isdir(ref):
         cand = os.path.normpath(ref)
-        return cand if os.path.isdir(cand) else None
+        if os.path.isdir(cand):
+            return cand
+        # A namespace-qualified ref — `talks/<slug>`, the form that says which of the two
+        # texts sharing a slug is meant — is relative to the DESK. That is the same thing as
+        # the working directory whenever a tool is run from the desk root, and is not when it
+        # is run from a subdirectory or against an explicit --root.
+        under = os.path.normpath(os.path.join(root, ref))
+        return under if os.path.isdir(under) else None
     order = (TALKS, PIECES) if prefer == 'talk' else (PIECES, TALKS)
     for name in order:
         cand = os.path.join(root, name, ref)

@@ -3539,6 +3539,107 @@ def unit_dc(tmp):
     check('generate refuses a figure the draft names that is not on disk', code == 2 and 'never-generated.png' in log, log.strip())
 
 
+def _run_tb(*args):
+    tool = os.path.join(HERE, 'talk_bundle.py')
+    r = subprocess.run([sys.executable, tool, *args], capture_output=True, text=True)
+    return r.returncode, (r.stdout + r.stderr)
+
+
+def unit_talk_tags(tmp):
+    """A talk's tags live on the DESK and reach the store (2026-09-15).
+
+    Before this they could not be expressed at all: talk_bundle wrote slug, title, date,
+    digest, outlets, kind and subtitle, so a published talk's tags were hand-written in the
+    SITE repo, in free text, in a vocabulary nothing checked — and the fault showed up the
+    only way it could, as a live page with no tags on it. Every case here is that fault or a
+    way of reintroducing it.
+    """
+    print("\n-- talk tags: the desk owns them, the bundler carries them ----------")
+    import tags as tg
+    root = os.path.join(tmp, 'ttdesk')
+    talks, pieces_d = os.path.join(root, 'talks'), os.path.join(root, 'pieces')
+    os.makedirs(os.path.join(talks, 'a-talk'), exist_ok=True)
+    os.makedirs(os.path.join(pieces_d, 'an-essay'), exist_ok=True)
+    os.makedirs(os.path.join(root, 'publishing'), exist_ok=True)
+    vocab = os.path.join(root, 'publishing', 'tags.yaml')
+    open(vocab, 'w').write('tags:\n  - tag: geometry\n    label: Geometry\n    about: Shapes.\n'
+                           '  - tag: rooms\n    label: Rooms\n    about: Rooms.\n')
+    open(os.path.join(pieces_d, 'an-essay', 'publish.yaml'), 'w').write('title: An Essay\n')
+    tpath = os.path.join(talks, 'a-talk', 'talk.yaml')
+    open(tpath, 'w').write('title: A Talk   # settled\nsubtitle: or, A Sub\n')
+    run = lambda *a: tg.main(['--root', root, *a])
+
+    # tags.py reaches the talks namespace
+    check('talk tags: a bare slug prefers pieces/, `talks/<slug>` names the talk',
+          run('show', 'talks/a-talk') == 0 and run('show', 'an-essay') == 0)
+    check('talk tags: add writes into talk.yaml, not publish.yaml',
+          run('add', 'talks/a-talk', 'rooms', 'geometry') == 0
+          and 'tags:' in open(tpath).read()
+          and not os.path.exists(os.path.join(talks, 'a-talk', 'publish.yaml')),
+          open(tpath).read())
+    check('talk tags: the comment on another key survives the write',
+          '# settled' in open(tpath).read(), open(tpath).read())
+    check('talk tags: vocabulary order, not the order typed',
+          tg.tags_of(tg.read_manifest(os.path.join(talks, 'a-talk')))[0] == ['geometry', 'rooms'],
+          open(tpath).read())
+    check('talk tags: an undefined tag is refused and nothing is written',
+          run('add', 'talks/a-talk', 'not-a-tag') == 3
+          and tg.tags_of(tg.read_manifest(os.path.join(talks, 'a-talk')))[0] == ['geometry', 'rooms'])
+    rows = {r['ref']: r for r in tg.corpus(root)}
+    check('talk tags: corpus spans both namespaces and keys by ref, not by slug',
+          set(rows) == {'talks/a-talk', 'pieces/an-essay'} and rows['talks/a-talk']['kind'] == 'talk',
+          str(sorted(rows)))
+    problems, _notes = tg.check(root, vocab)
+    check('talk tags: check passes a well-tagged talk', not problems, str(problems))
+    open(tpath, 'a').write('  - practise\n')
+    problems, _n = tg.check(root, vocab)
+    check('talk tags: check names the TALK, not a bare slug its essay could own',
+          any("carried by talks/a-talk" in p for p in problems), str(problems))
+    open(tpath, 'w').write('title: A Talk\nsubtitle: or, A Sub\ntags:\n  - geometry\n  - rooms\n')
+
+    # out through the bundler
+    src = os.path.join(tmp, 'tt-src'); os.makedirs(src, exist_ok=True)
+    open(os.path.join(src, 'piece.yaml'), 'w').write(
+        'slug: a-talk\ntitle: A Talk\nsubtitle: or, A Sub\npublished_at: 2026-09-15\n'
+        'outlets:\n  - site\nbody: |\n  The framing prose.\n')
+    deck = os.path.join(tmp, 'tt-deck'); os.makedirs(deck, exist_ok=True)
+    json.dump({'slug': 'a-talk', 'title': 'A Talk', 'slideCount': 2,
+               'slides': [{'index': 0, 'label': 'One', 'notes': ''}]},
+              open(os.path.join(deck, 'notes.json'), 'w'))
+    bundle = os.path.join(tmp, 'tt-bundle')
+    code, log = _run_tb(src, deck, bundle, '--desk', root)
+    check('talk tags: the bundle builds and says which tags it carried',
+          code == 0 and 'tags: geometry, rooms' in log, log.strip()[:300])
+    if code == 0:
+        rec = json.load(open(os.path.join(bundle, 'talks', 'a-talk', 'piece.json')))
+        idx = json.load(open(os.path.join(bundle, 'index.json')))
+        entry = [p for p in idx['pieces'] if p['slug'] == 'a-talk'][0]
+        want = [{'tag': 'geometry', 'label': 'Geometry'}, {'tag': 'rooms', 'label': 'Rooms'}]
+        check('talk tags: the record and the index entry carry {tag,label}, as a piece does',
+              rec.get('tags') == want and entry.get('tags') == want and entry['kind'] == 'talk',
+              str((rec.get('tags'), entry.get('tags'))))
+
+    # the refusals, each one a way back to the fork
+    open(os.path.join(src, 'piece.yaml'), 'a').write('tags:\n  - geometry\n')
+    code, log = _run_tb(src, deck, os.path.join(tmp, 'tt-b2'), '--desk', root)
+    check('talk tags: tags in the SITE piece.yaml are refused, naming where they belong',
+          code == 9 and 'live on the DESK' in log, log.strip()[:200])
+    open(os.path.join(src, 'piece.yaml'), 'w').write(
+        'slug: a-talk\ntitle: A Talk\npublished_at: 2026-09-15\noutlets:\n  - site\n'
+        'body: |\n  The framing prose.\n')
+    code, log = _run_tb(src, deck, os.path.join(tmp, 'tt-b3'), '--desk', os.path.join(tmp, 'nodesk'))
+    check('talk tags: a desk that does not know the talk is refused, not silently untagged',
+          code == 3 and 'no talks/a-talk' in log, log.strip()[:200])
+    open(tpath, 'w').write('title: A Talk\ntags:\n  - not-a-tag\n')
+    code, log = _run_tb(src, deck, os.path.join(tmp, 'tt-b4'), '--desk', root)
+    check('talk tags: a tag outside the vocabulary stops the bundle (exit 8)',
+          code == 8 and 'not in the tag vocabulary' in log, log.strip()[:200])
+    open(tpath, 'w').write('title: A Talk\n')
+    code, log = _run_tb(src, deck, os.path.join(tmp, 'tt-b5'), '--desk', root)
+    check('talk tags: an untagged talk still bundles, and says it carries none',
+          code == 0 and 'no tags' in log, log.strip()[:200])
+
+
 def unit_store(tmp):
     """The two publishing tools, exercised without touching AWS.
 
@@ -3662,8 +3763,16 @@ def unit_store(tmp):
             {'slug': 'elsewhere', 'title': 'Elsewhere', 'published_at': '2026-01-01',
              'digest': 'sha256:dead', 'outlets': ['alignmentfellowship'], 'kind': 'piece'}]}, f)
 
-    r = subprocess.run([sys.executable, os.path.join(HERE, 'talk_bundle.py'), talk, deck, bundle],
-                       capture_output=True, text=True)
+    # A talk is bundled against the desk that holds its script — that is where its tags live
+    # (unit_talk_tags), so the desk has to know it. This one is untagged, which is allowed.
+    tdesk = os.path.join(tmp, 'talk-desk')
+    os.makedirs(os.path.join(tdesk, 'pieces'), exist_ok=True)
+    os.makedirs(os.path.join(tdesk, 'talks', 'a-talk'), exist_ok=True)
+    with open(os.path.join(tdesk, 'talks', 'a-talk', 'talk.yaml'), 'w', encoding='utf-8') as f:
+        f.write('title: A Talk\n')
+
+    r = subprocess.run([sys.executable, os.path.join(HERE, 'talk_bundle.py'), talk, deck, bundle,
+                        '--desk', tdesk], capture_output=True, text=True)
     check('a talk bundle assembles', r.returncode == 0, (r.stdout + r.stderr).strip())
     if r.returncode != 0:
         return
@@ -5956,6 +6065,7 @@ def main():
         unit_talk(tmp)
         unit_deck(tmp)
         unit_dc(tmp)
+        unit_talk_tags(tmp)
         unit_store(tmp)
         unit_tags(tmp)
         unit_publications(tmp)

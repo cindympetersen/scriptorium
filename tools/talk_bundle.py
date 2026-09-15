@@ -6,12 +6,14 @@ A talk is a piece with slides (BUNDLE.md, "Talks"). This puts the two halves tog
 
   INPUT   <talk>/piece.yaml            title, date, venue, and the framing prose
           <deck>/                      output of dc_to_deck.py
+          talks/<slug>/talk.yaml       ON THE DESK: the talk's `tags:` and `publication:`
+
+  usage: python3 tools/talk_bundle.py <talk-dir> <deck-dir> <bundle-dir>
+                 [--desk <instance>] [--registry <publications.yaml>] [--tags <vocabulary>]
 
   OUTPUT  <bundle>/talks/<slug>/piece.json  the piece, with its `talk` block
           <bundle>/talks/<slug>/…      deck.html, notes.json, deck-stage.js, assets
           <bundle>/index.json          created, or updated in place if it exists
-
-  usage: python3 tools/talk_bundle.py <talk-dir> <deck-dir> <bundle-dir>
 
 The body is the talk's framing prose, not its transcript. A transcript is derived from
 notes.json by the renderer, which is the arrangement BUNDLE.md records and deliberately
@@ -25,6 +27,11 @@ import os
 import re
 import shutil
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import corpus                                                   # noqa: E402
+import publications as pb                                       # noqa: E402
+import tags as tagvocab                                         # noqa: E402
 
 try:
     import yaml
@@ -54,8 +61,74 @@ def reader_text(md):
     return t.strip()
 
 
+def desk_tags(root, slug, registry=None, vocab_file=None):
+    """-> [{tag, label}] for a talk, from the DESK's talks/<slug>/talk.yaml.
+
+    The talk's tags live on the desk, with its script, and not in the site's piece.yaml —
+    which is the whole point: before 2026-09-15 a published talk's tags were hand-written in
+    the site repo, in free text, in a vocabulary nothing checked, and the desk could not
+    express them at all. So a bundle is built against a desk that knows the talk, and this
+    refuses rather than quietly shipping a talk with no tags:
+
+      exit 3  the desk has no talks/<slug> — the bundle is being built against a desk that
+              does not know this talk, which is the fork condition itself
+      exit 8  a tag the publication's vocabulary does not define, or no vocabulary
+      exit 9  the talk carries tags and names no publication (a tag means something only
+              within one), or the registry is malformed
+
+    A talk with no `tags:` is fine and carries none: not every talk is tagged.
+    """
+    d = corpus.find(root, slug, prefer='talk')
+    if not d or corpus.kind_of(d) != 'talk':
+        die(3, f'{slug}: no talks/{slug} on the desk at {root} — a talk is bundled against the '
+               f'desk that holds its script, and its tags live there (talk.yaml). '
+               f'Pass --desk <instance> if this is not it.')
+    man = pb.read_manifest(d) or {}
+    names, problem = tagvocab.tags_of(man)
+    if problem:
+        die(9, f'talks/{slug}: {problem}')
+    if not names:
+        return []
+    try:
+        pubs, reg_problems = pb.load(root, registry)
+    except tagvocab.Refused as e:
+        die(9, f'talks/{slug}: {e}')
+    if reg_problems:
+        die(9, 'the publication registry is malformed:\n  ' + '\n  '.join(reg_problems))
+    vocabs = tagvocab.Vocabularies(root, vocab_file, pubs)
+    publication, pprobs = pb.of_piece(man, pubs)
+    if vocabs.per_publication and not publication:
+        die(9, f'talks/{slug} carries tags but ' + '; '.join(pprobs)
+               + ' — a tag means something only within a publication. Add `publication:` to '
+                 f'{os.path.relpath(pb.manifest_path(d), root)}.')
+    try:
+        vocab, vprobs = vocabs.get(publication)
+    except tagvocab.Refused as e:
+        die(9, f'talks/{slug}: {e}')
+    if vprobs:
+        die(8, f'talks/{slug}: its tag vocabulary is malformed:\n  ' + '\n  '.join(vprobs))
+    if vocab is None:
+        die(8, f'talks/{slug} carries tags but there is no vocabulary at '
+               f'{vocabs.path(publication)}.')
+    unknown = [t for t in names if t not in vocab]
+    if unknown:
+        die(8, f"talks/{slug}: not in the tag vocabulary: {', '.join(unknown)}. Run tags.py check.")
+    return [{'tag': t, 'label': vocab[t]['label']}
+            for t in tagvocab.ordered(names, vocab)]
+
+
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith('-')]
+    argv = sys.argv[1:]
+
+    def opt(name, default=None):
+        return argv[argv.index(name) + 1] if name in argv else default
+    desk = opt('--desk')
+    registry, vocab_file = opt('--registry'), opt('--tags')
+    flagged = set()
+    for name in ('--desk', '--registry', '--tags'):
+        if name in argv:
+            flagged.add(argv[argv.index(name) + 1])
+    args = [a for a in argv if not a.startswith('-') and a not in flagged]
     if len(args) != 3:
         print(__doc__)
         return 1
@@ -87,6 +160,11 @@ def main():
     if not body:
         die(1, f'{meta_path}: body is required (the framing prose above the deck)')
 
+    if meta.get('tags'):
+        die(9, f'{meta_path}: a talk\'s tags live on the DESK, in talks/{slug}/talk.yaml, '
+               f'against its publication\'s vocabulary — not here. Move them and remove this key.')
+    tags = desk_tags(pb.instance_root(desk), slug, registry, vocab_file)
+
     plain = reader_text(body)
     digest = 'sha256:' + hashlib.sha256(plain.encode('utf-8')).hexdigest()
 
@@ -112,6 +190,8 @@ def main():
     for k in ('subtitle', 'canonical', 'footnotes'):
         if meta.get(k):
             piece[k] = meta[k]
+    if tags:
+        piece['tags'] = tags
     for k in ('venue', 'delivered_at', 'duration_minutes'):
         if meta.get(k):
             piece['talk'][k] = str(meta[k]) if k == 'delivered_at' else meta[k]
@@ -144,6 +224,10 @@ def main():
     }
     if meta.get('subtitle'):
         entry['subtitle'] = meta['subtitle']
+    # Same shape as bundle_pieces writes for a piece, so a site reads a talk's tags exactly
+    # where it reads an essay's.
+    if tags:
+        entry['tags'] = tags
     # Replace THIS talk's entry and nothing else. Matching on slug alone would drop the
     # essay that shares it.
     index['pieces'] = [p for p in index.get('pieces', [])
@@ -159,7 +243,8 @@ def main():
     assets = os.path.join(talk_out, 'assets')
     n_assets = len(os.listdir(assets)) if os.path.isdir(assets) else 0
     print(f"✓ {bundle_dir} — {slug}: {notes['slideCount']} slides, {n_assets} assets, "
-          f"{len(index['pieces'])} piece(s) in index — outlets: {', '.join(outlets)}")
+          f"{len(index['pieces'])} piece(s) in index — outlets: {', '.join(outlets)}"
+          + (f" — tags: {', '.join(t['tag'] for t in tags)}" if tags else ' — no tags'))
     return 0
 
 

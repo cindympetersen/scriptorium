@@ -90,7 +90,11 @@ def piece_dir(root, ref):
 
 
 def manifest_path(pdir):
-    return os.path.join(pdir, 'publish.yaml')
+    """The manifest a text keeps its front matter in — `talk.yaml` for a talk, `publish.yaml`
+    for a piece. Read from the directory rather than from its path, as corpus.kind_of does:
+    the two namespaces are told apart by what is in them, never by where they sit."""
+    talk = os.path.join(pdir, 'talk.yaml')
+    return talk if os.path.exists(talk) else os.path.join(pdir, 'publish.yaml')
 
 
 def read_manifest(pdir):

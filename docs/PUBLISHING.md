@@ -137,7 +137,17 @@ homes:
 |---|---|---|
 | the script | desk (`draft.md`) | it is prose, and it is what the speaker says |
 | speaker notes | desk | authored with the script, not with the slides |
+| **its tags** | **desk (`talk.yaml`)** | a tag is a controlled vocabulary word, and the desk owns the vocabulary |
 | the deck | **Claude Design** (`.dc.html`) | designed visually; the desk cannot express layout |
+
+**A talk is tagged on the desk** (2026-09-15). `talks/<slug>/talk.yaml` carries `publication:`
+and `tags:`, checked by `tags.py` against that publication's vocabulary exactly as a piece's are,
+and `talk_bundle.py` writes them into the talk's record and its index entry as `[{tag, label}]`.
+Until then the desk could not express a talk's tags at all, so they were hand-written in the site
+repo in free text — and the fault surfaced the only way it could, as a live talk page with no tags
+on it while its sibling had three that no vocabulary knew. A site keeps its own presentation file
+for what is genuinely its own (a talk's index-card summary, whether it is listed), and reads the
+tags from the store.
 
 The flow, as it stands since 2026-09-14 — **the draft owns every word on a slide, every figure
 and the speaker notes; the canvas owns layout, and nothing else.** The first talk's deck forked

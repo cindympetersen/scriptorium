@@ -20,6 +20,14 @@ WHERE THINGS LIVE (an instance, not the framework — no personal writing lives 
     publishing/tags/<publication>.yaml   a publication's vocabulary (registry `tags:` overrides)
     publishing/tags.yaml                 THE vocabulary, on a desk with no registry
     pieces/<slug>/publish.yaml           `tags:`, a block list of vocabulary tags
+    talks/<slug>/talk.yaml               the same, for a talk — BOTH namespaces are in scope
+
+A TALK IS TAGGED LIKE ANYTHING ELSE (2026-09-15). Its manifest is `talk.yaml` rather than
+`publish.yaml`, and it names its own `publication:` there; `talk_bundle.py` carries the tags
+into the published record and the store index, so a site reads a talk's tags where it reads a
+piece's. Before this the desk could not express them at all and they were hand-written in the
+site repo, in a vocabulary nothing checked. Name a talk `talks/<slug>`: a bare slug prefers
+`pieces/`, and the two namespaces share slugs on purpose.
 
     tags:
       - tag: practice             # the id: lowercase, hyphenated, the URL segment
@@ -56,6 +64,7 @@ import os, re, sys, json, argparse, tempfile
 import yaml
 
 import publications as pb
+import corpus as ns                     # ALIASED: `def corpus` below would shadow the module
 from publications import Refused, instance_root, pieces, piece_dir, manifest_path, read_manifest  # noqa: F401
 
 DEFAULT_VOCAB = os.path.join('publishing', 'tags.yaml')
@@ -253,8 +262,8 @@ def set_tags(pdir, tags):
     cannot be made safely."""
     path = manifest_path(pdir)
     if not os.path.exists(path):
-        raise Refused(f'{os.path.basename(pdir)} has no publish.yaml. Tags live in the manifest; '
-                      f'create it first (templates/piece/publish.yaml).')
+        raise Refused(f'{os.path.basename(pdir)} has no {os.path.basename(path)}. Tags live in '
+                      f'the manifest; create it first (templates/).')
     with open(path, encoding='utf-8') as fh:
         old = fh.read()
     lines = old.splitlines(keepends=True)
@@ -306,20 +315,29 @@ def title_of(pdir, man):
 
 
 def corpus(root, pubs=None):
-    """-> [{slug, dir, title, manifest, tags, problem, published_at, publication, pub_problems}]."""
+    """-> [{slug, ref, kind, dir, title, manifest, tags, problem, published_at, live,
+    publication, pub_problems}], across BOTH namespaces.
+
+    A talk is a text with tags like any other — its manifest is `talk.yaml` and its date
+    lives with its outlet rather than on the desk, so it reports `live` instead. Rows are
+    keyed by `ref` (`talks/x`, `pieces/x`) and not by slug: the two namespaces share slugs
+    on purpose, so a slug alone does not name a text."""
     out = []
-    for slug, d in pieces(root):
+    for slug, d, kind in ns.texts(root):
+        base = {'slug': slug, 'ref': ns.rel(root, d), 'kind': kind, 'dir': d}
         try:
             man = read_manifest(d)
         except yaml.YAMLError as e:
-            out.append({'slug': slug, 'dir': d, 'title': slug, 'manifest': False, 'tags': [],
-                        'problem': f'publish.yaml does not parse ({e.__class__.__name__})',
-                        'published_at': None, 'publication': None, 'pub_problems': []})
+            out.append({**base, 'title': slug, 'manifest': False, 'tags': [],
+                        'problem': f'{os.path.basename(manifest_path(d))} does not parse '
+                                   f'({e.__class__.__name__})',
+                        'published_at': None, 'live': False, 'publication': None, 'pub_problems': []})
             continue
         t, problem = tags_of(man)
         pid, pprobs = pb.of_piece(man, pubs)
-        out.append({'slug': slug, 'dir': d, 'title': title_of(d, man), 'manifest': man is not None,
+        out.append({**base, 'title': title_of(d, man), 'manifest': man is not None,
                     'tags': t, 'problem': problem, 'publication': pid, 'pub_problems': pprobs,
+                    'live': ns.live(d),
                     'published_at': str(man.get('published_at'))[:10] if man and man.get('published_at') else None})
     return out
 
@@ -333,18 +351,21 @@ def check(root, vocab_file=None, pubs=None):
     problems, notes = [], []
     rows = corpus(root, pubs)
     used = {}                                               # (publication, tag) -> [slug]
+    # A piece is named by its slug, as it always was; a talk is named `talks/<slug>`, because
+    # the slug it shares with its companion essay would not say which text is meant.
+    named = lambda r: r['ref'] if r['kind'] == 'talk' else r['slug']
     for r in rows:
         if r['problem']:
-            problems.append(f"{r['slug']}: {r['problem']}")
+            problems.append(f"{named(r)}: {r['problem']}")
         if not r['tags']:
             continue
         if vs.per_publication and not r['publication']:
-            problems.append(f"{r['slug']}: carries tags but " + '; '.join(r['pub_problems'])
+            problems.append(f"{named(r)}: carries tags but " + '; '.join(r['pub_problems'])
                             + ' — a tag means something only within a publication')
             continue
         key = r['publication'] if vs.per_publication else None
         for t in r['tags']:
-            used.setdefault((key, t), []).append(r['slug'])
+            used.setdefault((key, t), []).append(named(r))
     for pub in vs.publications():
         path = vs.path(pub)
         vocab, vprobs = vs.get(pub)
@@ -366,8 +387,10 @@ def check(root, vocab_file=None, pubs=None):
 
 # ------------------------------------------------------------------ the CLI
 def _row(r):
-    date = r['published_at'] or 'unpublished'
-    return f"  {r['slug']:44} {date:12} {r['title']}"
+    # A talk's date lives with its outlet, not on the desk, so it reports live/unpublished.
+    date = r['published_at'] or ('live' if r.get('live') else 'unpublished')
+    name = r['ref'] if r['kind'] == 'talk' else r['slug']
+    return f"  {name:44} {date:12} {r['title']}"
 
 
 def main(argv=None):
@@ -438,7 +461,9 @@ def _dispatch(a, root, vs, pubs):
         for p in problems:
             print(f'  FAIL  {p}')
         tagged = sum(1 for r in rows if r['tags'])
-        print(f"{tagged} of {len(rows)} piece(s) tagged: "
+        talks = sum(1 for r in rows if r['kind'] == 'talk')
+        print(f"{tagged} of {len(rows)} text(s) tagged"
+              + (f' ({talks} talk(s))' if talks else '') + ': '
               + (f'{len(problems)} problem(s)' if problems else 'every tag is in its vocabulary'))
         return 1 if problems else 0
 
@@ -491,8 +516,10 @@ def _dispatch(a, root, vs, pubs):
             print(_row(r) + (f"   [{r['publication']}]" if vs.per_publication and not pub else ''))
         return 0
 
+    # A bare slug prefers pieces/ (NAMESPACES.md); `talks/<slug>` names the talk explicitly,
+    # which is how a talk sharing its companion essay's slug is reached.
     d = piece_dir(root, a.piece)
-    slug = os.path.basename(d)
+    slug = ns.rel(root, d) if ns.kind_of(d) == 'talk' else os.path.basename(d)
     man = read_manifest(d)
     current, problem = tags_of(man)
     if problem:
@@ -506,7 +533,8 @@ def _dispatch(a, root, vs, pubs):
 
     if vs.per_publication and not pid:
         raise Refused(f"{slug} {'; '.join(pprobs)}. A tag means something only within a publication: "
-                      f"assign one first (publications.py assign {slug} <publication>).")
+                      f"assign one first (publications.py assign {a.piece} <publication>), which "
+                      f"writes into {os.path.basename(manifest_path(d))}.")
     vocab, vprobs = vs.get(pid)
 
     if a.cmd == 'add':

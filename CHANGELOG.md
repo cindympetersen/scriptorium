@@ -21,6 +21,16 @@ GitHub release with the same text.
 
 ## Unreleased
 
+- **A talk's tags live on the desk and reach the store.** `talks/<slug>/talk.yaml` takes `tags:`
+  and `publication:` like a piece's `publish.yaml`; `tags.py` spans both namespaces (name a talk
+  `talks/<slug>` — a bare slug still prefers `pieces/`); `talk_bundle.py` resolves them against
+  the publication's vocabulary and writes `[{tag, label}]` into the talk's record and its index
+  entry, the same shape `bundle_pieces.py` writes for a piece, so a site reads a talk's tags where
+  it reads an essay's. It refuses a bundle built against a desk that does not know the talk
+  (exit 3), a tag the vocabulary does not define (exit 8), tags with no publication (exit 9), and
+  `tags:` in the site-side `piece.yaml`. **A desk adopts this by adding `publication:` and `tags:`
+  to its talks**; a talk without them bundles as before and carries none.
+
 - **Adoption is fork-first** (README, SETUP.md, `new-desk --framework <your fork>` with
   `upstream` as a second remote), and **CONTRIBUTING.md** plus a pull-request template say what
   belongs upstream, what never does, and what a PR carries. Docs only; nothing a desk must change.
