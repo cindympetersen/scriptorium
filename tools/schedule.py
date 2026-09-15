@@ -640,12 +640,18 @@ def cmd_record(args):
     path = os.path.join(pdir, 'publish.yaml')
     src = open(path, encoding='utf-8').read()
     from datetime import date
+    # Free text is emitted as a JSON string (a valid YAML double-quoted scalar), the fix
+    # `arm` got on 2026-09-11 and this writer did not: an --evidence of
+    # "GET /api/v1/drafts/<id>: postSchedules …" is the natural thing to write and its colon
+    # made the whole manifest unreadable (a-writing-desk-that-keeps-its-receipts, 2026-09-15),
+    # which every tool on the desk then refused — including `arm`, which reads the file.
+    qs = json.dumps
     entry = (f'  {args.outlet}:\n'
              f'    at: {fmt(moment)}\n'
              f'    set: {date.today().isoformat()}\n'
-             f'    where: {args.where}\n'
-             f'    evidence: {args.evidence or "none recorded"}\n'
-             f'    approved: {args.approved}\n')
+             f'    where: {qs(args.where)}\n'
+             f'    evidence: {qs(args.evidence or "none recorded")}\n'
+             f'    approved: {qs(args.approved)}\n')
     if re.search(r'(?m)^scheduled:$', src):
         # replace this outlet's entry if it has one, else append to the block
         pat = re.compile(r'(?ms)^  %s:\n(?:    .*\n)*' % re.escape(args.outlet))
@@ -658,6 +664,12 @@ def cmd_record(args):
             '\n\n# Native schedules actually SET on a platform, per outlet — the act, not the\n'
             '# intent. `publish_at` says when the piece is due; this says a scheduler was told.\n'
             'scheduled:\n' + entry)
+    try:
+        import yaml as _yaml
+        _yaml.safe_load(src)
+    except Exception as e:
+        sys.exit(f'refusing to record: the result would not parse as YAML — {e}\n'
+                 f'  nothing was written. This is a bug in this tool, not in your input.')
     open(path, 'w', encoding='utf-8').write(src)
     print(f'{os.path.basename(pdir)}: {args.outlet} scheduled for {fmt(moment)} '
           f'({args.where}) — recorded')
