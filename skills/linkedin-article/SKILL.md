@@ -47,8 +47,9 @@ It refuses, with no `--force`, when:
   that 404s is a broken promise in the opening sentence — and if LinkedIn goes up first,
   LinkedIn is the copy search engines find.
 
-Then, without `--check`, it writes `pieces/<name>/linkedin/article.html` and
-`article.json` (title, canonical, figures in upload order with their alt text).
+Then, without `--check`, it writes `pieces/<name>/linkedin/article.html`, `article.json`
+(title, canonical, the cover, figures in upload order with their alt text) and `cover.json`
+(the hero's local path and caption — see 4b).
 
 ## What the copy looks like, and why
 
@@ -57,6 +58,7 @@ Then, without `--check`, it writes `pieces/<name>/linkedin/article.html` and
 | `rel=canonical` | *Originally published at <url>* as the first line | LinkedIn emits no canonical tag |
 | subtitle | italic lede under that line | an Article has a title and nothing else |
 | native footnotes | `[1]` in the text, **Notes** at the end | LinkedIn has no footnotes; numbered in first-reference order, as Substack numbers them |
+| the hero | the Article's **cover**, uploaded into LinkedIn's own cover control, with `cover_caption` typed under it | the cover is the card thumbnail everywhere the Article is listed; a body figure is not (4b) |
 | figures | a marked slot, replaced by pasting that figure over it | a pasted image uploads on save but loses its alt, so figures go one at a time and each alt is restored from its payload |
 
 ## Composing — measured 2026-09-10, end to end, in the built-in pane
@@ -91,6 +93,39 @@ scratch is the one editor allowed to be overwritten. Never Publish from it.
    **59/59 blocks byte-identical**. Unlike Substack, **no smart-quote rewriting**. Two changes to
    expect, neither a fault: **every `h2` becomes `h3`** (LinkedIn demotes headings a level), and
    an `em` wrapping a link **splits around it** (the canonical line: 23 `em` sent, 25 counted).
+4b. **The cover — the hero goes HERE, not into the body (2026-09-15).** An Article's thumbnail on
+   every card — the feed, the author's Articles list, a share — is its **cover image**, a slot
+   above the headline that LinkedIn keeps apart from the body. Until today the hero was pasted in
+   as figure 1 and the cards showed no image at all (Eric: *"it looks like we don't have a
+   preview image for linkedin posts"*). `md_to_linkedin` now writes the manifest's `cover:` to
+   `cover.json` and gives it **no body slot**; figures are numbered without it. Measured on three
+   Articles, one draft and two already published:
+   - **Open the control.** The empty cover area reads *Add a cover image or video to your
+     article* with an **Upload from computer** button. The button creates its file input on
+     click. A click by accessibility ref **did not fire reliably** (one of three times); a
+     synthetic `button.click()` from the page did, every time, and opens an *Add cover image or
+     video* dialog holding a real `input[type=file]`.
+   - **Upload from the local file, never a carried data URI.** Find that input and use the
+     browser tool's file upload on `assets/hero.png` (the path in `cover.json`). Do not click the
+     input — that opens a native picker nobody can drive. Then **Next** in the dialog.
+   - **Caption, then WAIT.** The cover lands with an *Add credit and caption* textbox under it;
+     type `cover.json`'s `caption` there. The cover's `src` is a `data:` URI until the autosave —
+     **navigating away inside ~15 s lost the cover once** (the caption survived, the image did
+     not). Wait for *Draft - saved*, reload, and read back an `<img>` outside the editor whose
+     `src` is `media.licdn.com/dms/image/…/article-cover…` plus the caption textarea. Only then
+     move on.
+   - **A cover has no alt field.** The hero's alt stays on the blog and Substack; on LinkedIn
+     the caption is what a reader gets. Do not paste the hero into the body to keep the alt —
+     the same image twice, stacked, is what an Article looked like on 2026-09-15 before the
+     body copy came out.
+   - **Retrofitting a published Article** is the same steps in its editor (`/pulse/…` → *Edit
+     article*, or `/article/edit/<id>/`), then delete the body's figure-1 copy of the hero by
+     ProseMirror (`tr.delete` on the first `figureImage`, after checking its alt is the hero's),
+     wait for the save, reload, and click **Update** — no dialog follows; the page lands on
+     `/pulse/…` with the cover above the headline. **Update by ref also did not always fire;
+     `button.click()` did.** Read the public page back: one `article-cover` image, the diagrams
+     `article-inline`, the hero not repeated.
+
 5. **Figures, one at a time.** For figure *N*: carry `<out>/fig<N>.json`, find the paragraph
    whose text starts `[Figure N — upload here]`, `E.commands.setNodeSelection(pos)`, and paste an
    `<img>` **built with `document.createElement`** so its alt is escaped properly (the shared

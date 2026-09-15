@@ -119,11 +119,24 @@ def build(piece_dir):
     import yaml as _yaml
     _mp = os.path.join(piece_dir, 'publish.yaml')
     caps, cover, cover_caption = load_captions((_yaml.safe_load(open(_mp)) or {}) if os.path.exists(_mp) else {})
-    images, body = [], []
+    images, body, cover_img = [], [], None
     for b, src in zip(blocks, sources['body']):
         whole = re.fullmatch(r'!\[(.*?)\]\(([^)\s]+)\)', src.strip(), re.S)
         if whole:
             alt, path = whole.group(1), whole.group(2)
+            # THE HERO IS THE ARTICLE'S COVER, NOT A BODY FIGURE (2026-09-15). LinkedIn keeps a
+            # cover slot above the headline, and that slot is the thumbnail on every card the
+            # Article appears in — the feed, the author's Articles list, a share. Pasted into the
+            # body as figure 1 (what this tool did until today) the hero rendered inside the
+            # piece and the cards showed no image at all (Eric: "it looks like we don't have a
+            # preview image for linkedin posts"). So the manifest's `cover:` image gets no slot:
+            # it goes to `cover` in article.json and cover.json, and the skill uploads it into
+            # the cover control and types `cover_caption` under it. Two Articles published
+            # before this were updated by hand the same day. Note that a cover has no alt field
+            # on LinkedIn; the alt stays with the blog and Substack copies.
+            if cover and _is_cover(path, cover) and cover_img is None:
+                cover_img = {'path': path, 'alt': alt, 'caption': cover_caption or ''}
+                continue
             images.append({'n': len(images) + 1, 'path': path, 'alt': alt,
                            'caption': caption_for(path, caps, cover, cover_caption, {})})
             body.append(f'<p><strong>[Figure {len(images)} — upload here]</strong> '
@@ -133,7 +146,15 @@ def build(piece_dir):
 
     notes = [f'<p>[{number[n]}] {FN_MARK.sub("", c)}</p>' for n, c in ordered]
     return body, notes, images, {'residual': residual, 'unverified': unverified,
-                                 'fn_issues': fn_issues}
+                                 'fn_issues': fn_issues, 'cover': cover_img}
+
+
+def _is_cover(path, cover):
+    """Does this draft image path name the manifest's `cover:`? Compared as the manifest and the
+    draft each spell it (both are piece-relative), and by basename as a fallback, since a live
+    piece's draft may point at the CDN copy of the same file."""
+    norm = lambda x: os.path.normpath(str(x).strip())
+    return norm(path) == norm(cover) or os.path.basename(norm(path)) == os.path.basename(norm(cover))
 
 
 def image_files(piece_dir):
@@ -210,7 +231,10 @@ def main():
             refusals.append(f'canonical {canonical} is not live ({why}) — '
                             'publish it first and let it be indexed')
 
+    cover_img = guards.get('cover')
     files = image_files(piece)
+    if cover_img:
+        files = [f for f in files if not _is_cover(f, cover_img['path'])]
     if len(files) != len(images):
         refusals.append(f'{len(files)} image(s) in the draft but {len(images)} figure slot(s) '
                         'rendered — a figure would go missing')
@@ -227,6 +251,8 @@ def main():
     print(f"title      {title}")
     print(f"canonical  {canonical or '—'}   [{where}]")
     print(f"body       {len(body)} block(s), {len(notes)} note(s), {len(images)} figure(s)")
+    print(f"cover      {cover_img['path']} — the Article's COVER (its card thumbnail), not a body figure"
+          if cover_img else "cover      none (no `cover:` in publish.yaml) — the cards will carry no image")
     print(f"announce   {len(announce):,} characters (linkedin-post.md)" if announce else
           "announce   none yet: draft two or three from the piece's claims; the author approves one; "
           "save it as linkedin-post.md")
@@ -265,10 +291,20 @@ def main():
         fh.write('\n'.join(parts) + '\n')
     for img in images:
         img['file'] = os.path.join(piece, img.pop('path'))
+    if cover_img:
+        cover_img = dict(cover_img, file=os.path.join(piece, cover_img.pop('path')))
     with open(os.path.join(out, 'article.json'), 'w', encoding='utf-8') as fh:
-        json.dump({'title': title, 'canonical': canonical, 'images': images, 'announce': announce},
-                  fh, indent=2, ensure_ascii=False)
+        json.dump({'title': title, 'canonical': canonical, 'cover': cover_img, 'images': images,
+                   'announce': announce}, fh, indent=2, ensure_ascii=False)
         fh.write('\n')
+    if cover_img:
+        # The cover goes in through LinkedIn's own file control from this path (the skill uses the
+        # browser's upload tool on the local file), so no data URI is needed — only what the page
+        # asks for afterwards: the caption to type under it.
+        with open(os.path.join(out, 'cover.json'), 'w', encoding='utf-8') as fh:
+            json.dump({'file': cover_img['file'], 'name': os.path.basename(cover_img['file']),
+                       'alt': cover_img['alt'], 'caption': cover_img['caption']}, fh, ensure_ascii=False)
+            fh.write('\n')
     # One carry payload per figure. The bytes and the alt text travel together, so the
     # page that pastes the image is also the page that restores its alt — which the paste
     # drops — and neither is ever retyped.
@@ -281,7 +317,9 @@ def main():
             json.dump({'n': img['n'], 'alt': img['alt'], 'caption': img.get('caption', ''),
                        'name': os.path.basename(img['file']),
                        'dataUri': f'data:{mime};base64,{data}'}, fh, ensure_ascii=False)
-    print(f"\nwrote      {out}/article.html, article.json, fig1..{len(images)}.json")
+    print(f"\nwrote      {out}/article.html, article.json"
+          + (", cover.json" if cover_img else "")
+          + (f", fig1..{len(images)}.json" if images else " (no body figures)"))
     print("next       compose in LinkedIn's Article editor; a human clicks Publish")
     return 0
 
