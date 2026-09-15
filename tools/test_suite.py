@@ -711,6 +711,13 @@ def unit_canons(tmp):
             # A WHOLE-SECTION CITATION IS A REAL CITATION: the house cites al-Ikhlas as
             # "Qur'an 112", and keying that on an ayah the index cannot hold answered
             # "112:0 does not exist in this edition" — true, and useless.
+            # A RANGE IN A NUMBERED CANON. The depth-2 locus tail captured no end verse
+            # until 2026-09-14, so `99:7-8` was read as 99:7, checked alone, and told to
+            # "cite 99:7-8" — the checker flagging the correct note. Both dashes are cited.
+            rng = q.loci("Qur'an 99:7-8, Pickthall.") + q.loci("Qur'an 16:58–59")
+            check('canons: a numbered canon cites a range and keeps its end',
+                  len(rng) == 2 and rng[0][0] == ('quran', 99, 7) and rng[0][2] == 8
+                  and rng[1][0] == ('quran', 16, 58) and rng[1][2] == 59, repr(rng))
             whole = q.loci("Qur'an 112")
             check('canons: a surah cited whole keys on its first verse and ranges to its last',
                   [x[0] for x in whole] == [('quran', 112, 1)] and whole[0][2] == 4,
@@ -3368,6 +3375,170 @@ def unit_deck(tmp):
 
 
 # ---------------------------------------------------------------- unit: store publish
+
+DC_TALK_FIXTURE = """*Draft — v1. Header above the first --- is scaffold.*
+---
+## I. The Setup
+
+<!-- slide: The promise -->
+> Enough attributes &mdash; and the "right" person is a query away.
+
+The spoken script of the first slide. It says "hello" & waits.
+
+A second paragraph.
+
+<!-- slide: Two ways -->
+- a query
+- a room
+
+Bullets get script too.
+
+<!-- slide -->
+<!-- design: the figure fills the slide -->
+![Figure 1](assets/fig1.png)
+
+Introduce the figure, then show it.
+
+<!-- slide -->
+> One line to remember.
+
+The closing beat.
+"""
+
+DC_UNTAGGED = """<x-dc><x-import width="1280" height="720">
+<section data-label="Title" data-speaker-notes="Title slide. No page number. Let the room settle before the first line."><h1>T</h1></section>
+<section data-label="I. The Setup" data-speaker-notes="Section slide. Say the movement name and pause."><h2>I. The Setup</h2></section>
+<section data-label="The promise" data-speaker-notes="The spoken script of the first slide. It says &quot;hello&quot; &amp; waits.&#10;&#10;A second paragraph."><h2>The promise</h2><p>Enough attributes — and the “right” person is a query away.</p></section>
+<section data-label="Two ways" data-speaker-notes="Bullets get script too."><h2>Two ways</h2><ul><li>a query</li><li>a room</li></ul></section>
+<section data-label="Fig" data-speaker-notes="Introduce the figure, then show it."><svg></svg></section>
+<section data-label="Close" data-speaker-notes="The closing beat."><p>One line to remember.</p></section>
+</x-import></x-dc>
+"""
+
+
+def _run_dc(*args):
+    tool = os.path.join(HERE, 'md_to_dc.py')
+    r = subprocess.run([sys.executable, tool, *args], capture_output=True, text=True)
+    return r.returncode, (r.stdout + r.stderr)
+
+
+def unit_dc(tmp):
+    """The deck's canvas is generated from the draft and held to it. Every case here is the
+    fork that actually happened on the first talk (2026-09-09): words changed in the canvas
+    that the desk never saw, figures redrawn out of the deck, notes reworded — or the footgun a
+    re-sync could introduce by touching layout it should have kept."""
+    print("\n-- dc: draft.md -> design canvas, and the canvas held to the draft -----")
+    talk = os.path.join(tmp, 'dc-talk')
+    os.makedirs(os.path.join(talk, 'assets'), exist_ok=True)
+    with open(os.path.join(talk, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write(DC_TALK_FIXTURE)
+    with open(os.path.join(talk, 'talk.yaml'), 'w', encoding='utf-8') as f:
+        f.write('title: T\nsubtitle: S\nspeaker: Me\nfooter: T\n')
+    with open(os.path.join(talk, 'assets', 'fig1.png'), 'wb') as f:
+        f.write(_tiny_png())
+
+    c1 = os.path.join(tmp, 'dc-c1')
+    code, log = _run_dc('generate', talk, '--to', c1)
+    check('generate writes one artboard per slide, Main first, plus canvas.json and a preview image',
+          code == 0 and os.path.exists(os.path.join(c1, 'Main.dc.html'))
+          and os.path.exists(os.path.join(c1, 'canvas.json')) and os.path.exists(os.path.join(c1, 'fig1.png'))
+          and len([f for f in os.listdir(c1) if f.endswith('.dc.html')]) == 6, log.strip()[:300])
+    if code != 0:
+        return
+    main_ = open(os.path.join(c1, 'Main.dc.html'), encoding='utf-8').read()
+    check('the title slide carries title, subtitle and speaker as roles, and no page number',
+          'data-role="title"' in main_ and '>T</h1>' in main_ and '>S</p>' in main_
+          and '<span data-role="footer-num"></span>' in main_)
+    promise = open(os.path.join(c1, 'S03-the-promise.dc.html'), encoding='utf-8').read()
+    check('a claim slide keys on its title, its line is a role, a quote is escaped and an entity the draft wrote passes through',
+          'data-slide-key="the-promise"' in promise and 'data-role="line"' in promise
+          and '&mdash; and the &quot;right&quot;' in promise, promise[:600])
+    check('speaker notes ride the section as an attribute, paragraph breaks as &#10;',
+          'data-speaker-notes="The spoken script of the first slide. It says &quot;hello&quot; &amp; waits.&#10;&#10;A second paragraph."' in promise)
+    figboard = [f for f in os.listdir(c1) if f.startswith('S05-fig-fig1')]
+    check('an untitled figure slide keys on its figure and references the image by basename',
+          len(figboard) == 1 and 'data-role="figure" src="fig1.png"' in open(os.path.join(c1, figboard[0]), encoding='utf-8').read(), str(figboard))
+    cj = json.load(open(os.path.join(c1, 'canvas.json'), encoding='utf-8'))
+    check('canvas.json lays every artboard out and turns a design note into a sticky note above its slide',
+          len(cj['artboards']) == 6 and any(a['file'] == 'Main.dc.html' for a in cj['artboards'])
+          and cj.get('annotations') and cj['annotations'][0]['id'] == 'design-05-1'
+          and 'fills the slide' in cj['annotations'][0]['text'], str(cj)[:300])
+    check('the last slide keys on its line, not its position',
+          any(f.startswith('S06-line-one-line-to-remember') for f in os.listdir(c1)), str(os.listdir(c1)))
+
+    code, log = _run_dc('verify', talk, '--from', c1)
+    check('verify: a freshly generated canvas matches the draft', code == 0 and 'MATCH' in log, log.strip()[-200:])
+
+    # the designer edits layout; the author edits words
+    two = os.path.join(c1, 'S04-two-ways.dc.html')
+    t = open(two, encoding='utf-8').read().replace('font-size:40px;line-height:1.3;', 'font-size:44px;color:#4a6fa5;', 1)
+    with open(two, 'w', encoding='utf-8') as f:
+        f.write(t)
+    cj['annotations'].append({'id': 'note-1', 'x': 0, 'y': -400, 'w': 300, 'text': 'designer: keep it cool'})
+    json.dump(cj, open(os.path.join(c1, 'canvas.json'), 'w', encoding='utf-8'))
+    with open(os.path.join(talk, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write(DC_TALK_FIXTURE.replace('- a query\n', '- a database query\n')
+                .replace('<!-- slide -->\n> One line', '<!-- slide: New -->\n> A new slide.\n\nIts script.\n\n<!-- slide -->\n> One line'))
+    code, log = _run_dc('verify', talk, '--from', c1)
+    check('verify: a reworded bullet and a slide the draft gained are DRIFT, named by slide, exit 1',
+          code == 1 and "DRIFT  04 Two ways" in log and "'a database query'" in log and 'New' in log and 'missing from the canvas' in log,
+          log.strip()[-400:])
+    code, log = _run_dc('compose', talk, '--from', c1, '--to', os.path.join(tmp, 'dc-refused'))
+    check('compose refuses a drifting canvas', code == 1 and 'refuses' in log, log.strip()[-200:])
+
+    c2 = os.path.join(tmp, 'dc-c2')
+    code, log = _run_dc('resync', talk, '--from', c1, '--to', c2)
+    check('resync reports what it kept, added and dropped, and verifies its own output',
+          code == 0 and '6 kept' in log and '1 added' in log and '0 dropped' in log and 'verified' in log, log.strip()[:400])
+    if code == 0:
+        t2 = open(os.path.join(c2, 'S04-two-ways.dc.html'), encoding='utf-8').read()
+        check("the designer's layout edit survived and the author's words replaced the old ones",
+              'font-size:44px;color:#4a6fa5;' in t2 and '>a database query</li>' in t2 and '>a query</li>' not in t2, t2[:800])
+        cj2 = json.load(open(os.path.join(c2, 'canvas.json'), encoding='utf-8'))
+        check("the designer's sticky note is kept; ours are regenerated",
+              any(a['id'] == 'note-1' for a in cj2['annotations']) and any(a['id'].startswith('design-') for a in cj2['annotations']))
+        check('the new slide is an artboard', any(f.startswith('S06-new') for f in os.listdir(c2)), str(os.listdir(c2)))
+        code, log = _run_dc('verify', talk, '--from', c2)
+        check('verify: the re-synced canvas matches', code == 0, log.strip()[-200:])
+
+    # compose -> the site's one-file deck -> dc_to_deck builds it
+    src = os.path.join(tmp, 'dc-site-src')
+    code, log = _run_dc('compose', talk, '--from', c2, '--to', src)
+    deck = open(os.path.join(src, 'deck.dc.html'), encoding='utf-8').read() if code == 0 else ''
+    check('compose writes the x-import deck with assets/ paths and the full-resolution figure beside it',
+          code == 0 and '<x-import component-from-global-scope="deck-stage"' in deck and 'src="assets/fig1.png"' in deck
+          and 'width:1280px;height:720px;' not in deck and deck.count('<section') == 7
+          and open(os.path.join(src, 'assets', 'fig1.png'), 'rb').read() == _tiny_png(), log.strip()[:300])
+    with open(os.path.join(src, 'deck-stage.js'), 'w', encoding='utf-8') as f:
+        f.write('/* stub */\n')
+    code, log = _run_deck(src, os.path.join(tmp, 'dc-site-out'))
+    notes = json.load(open(os.path.join(tmp, 'dc-site-out', 'notes.json'), encoding='utf-8')) if code == 0 else {}
+    check('dc_to_deck builds the composed deck, notes decoded, title from the first h1',
+          code == 0 and notes.get('title') == 'T' and notes['slides'][2]['notes'].startswith('The spoken script of the first slide. It says "hello" & waits.\n\nA second'),
+          (log + str(notes.get('slides', [])[2:3]))[:300])
+    code, log = _run_dc('verify', talk, '--from', os.path.join(src, 'deck.dc.html'))
+    check('verify reads the composed deck as well as the artboards', code == 0 and 'MATCH' in log, log.strip()[-200:])
+
+    # the first talk's deck: untagged, matched by position, and its known drift found
+    with open(os.path.join(talk, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write(DC_TALK_FIXTURE)
+    un = os.path.join(tmp, 'dc-untagged.dc.html')
+    with open(un, 'w', encoding='utf-8') as f:
+        f.write(DC_UNTAGGED)
+    code, log = _run_dc('verify', talk, '--from', un)
+    check('an untagged deck is matched by position: typographic quotes are not drift, a figure drawn out of the deck is',
+          code == 1 and 'matched by position' in log and 'match  03 The promise' in log
+          and "DRIFT  05" in log and "['fig1.png']" in log and 'DRIFT — 1 slide' in log, log.strip()[-500:])
+    code, log = _run_dc('resync', talk, '--from', os.path.join(tmp, 'dc-untagged-dir'), '--to', os.path.join(tmp, 'dc-x'))
+    check('resync needs a directory of artboards', code == 2, log.strip()[-200:])
+
+    # refusals
+    with open(os.path.join(talk, 'draft.md'), 'w', encoding='utf-8') as f:
+        f.write(DC_TALK_FIXTURE.replace('assets/fig1.png', 'assets/never-generated.png'))
+    code, log = _run_dc('generate', talk, '--to', os.path.join(tmp, 'dc-c3'))
+    check('generate refuses a figure the draft names that is not on disk', code == 2 and 'never-generated.png' in log, log.strip())
+
+
 def unit_store(tmp):
     """The two publishing tools, exercised without touching AWS.
 
@@ -5780,6 +5951,7 @@ def main():
         unit_pronouns(tmp)
         unit_talk(tmp)
         unit_deck(tmp)
+        unit_dc(tmp)
         unit_store(tmp)
         unit_tags(tmp)
         unit_publications(tmp)

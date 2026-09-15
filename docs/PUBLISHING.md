@@ -139,24 +139,32 @@ homes:
 | speaker notes | desk | authored with the script, not with the slides |
 | the deck | **Claude Design** (`.dc.html`) | designed visually; the desk cannot express layout |
 
-The flow already used once, to be made routine:
+The flow, as it stands since 2026-09-14 — **the draft owns every word on a slide, every figure
+and the speaker notes; the canvas owns layout, and nothing else.** The first talk's deck forked
+because nothing held that line: the canvas was drawn from the slide briefs by hand, the design
+pass moved two figures' axes and reworded notes, the desk corrected the script, and neither
+could regenerate the other. `tools/md_to_dc.py` holds it now:
 
-1. The talk is defined on the desk — argument, beats, what each slide must carry.
-2. That spec is handed to Claude Design, which produces the deck as `.dc.html`.
-3. A framework tool converts the design export into a standalone deck: lift the slides
-   out of the `<x-dc>`/`<x-import>` authoring wrapper, emit plain `<deck-stage>` markup,
-   and drop the design runtime (which needs React). Speaker notes come out as a sidecar
-   `notes.json` so a phone remote can read them without loading the deck.
-   **Built:** `tools/dc_to_deck.py <src> <out>`. It was ported from the JavaScript
-   the muffinlabs site had been building decks with, so the desk stays one language;
-   the two are pinned byte-for-byte on the first real deck, and `test_suite.py`'s
-   `unit_deck` holds the conversion, the asset guard, and the refusals.
-4. The deck and notes go into the bundle and then the store.
+1. The talk is drafted on the desk — `draft.md`, figures from `assets/figures.py`.
+2. `md_to_dc.py generate <talk>` writes the canvas from the draft: one `.dc.html` artboard per
+   slide in the house markup (the first deck's, with every text element tagged by role and every
+   slide by a stable key), `canvas.json` laying them out a row per movement with each
+   `<!-- design: … -->` note as a sticky note above its slide, and a downsampled preview of each
+   figure. The `design` skill seeds and publishes that as the canvas the designer opens.
+3. The design pass happens in the canvas — layout, type, spacing, the accent — and is saved there.
+4. When the script changes: the saved canvas is read back (the design helper's `--extract`),
+   `md_to_dc.py resync` replaces the words, figures and notes in place and keeps every layout
+   edit, and the result is re-seeded to the same canvas. A slide whose shape changed (a bullet
+   gained, a figure added) is regenerated and the report says so.
+5. `md_to_dc.py verify` compares any canvas — extracted artboards or a composed deck — to the
+   draft slide by slide and exits 1 on drift. It runs before anything ships.
+6. `md_to_dc.py compose` assembles the artboards into the one-file `deck.dc.html` the site builds
+   from, with the full-resolution figures beside it, and **refuses on drift**; then
+   `dc_to_deck.py` lifts the slides out of the authoring wrapper, emits plain `<deck-stage>`
+   markup, drops the design runtime, and writes `notes.json` for a phone remote.
+7. The deck and notes go into the bundle and then the store.
 
-**Streamlining it** means the round trip is one command, not a manual export:
-`DesignSync` can read the project's files directly, so a `talk-sync` skill fetches the
-current `.dc.html` and assets, converts, validates and stages the bundle — the same
-shape as `substack-sync`. Two rules the conversion must keep, both learned the hard way:
+Two rules the conversion keeps, both learned the hard way:
 
 - **Assets are verified, not assumed.** A design asset larger than the read limit comes
   back truncated. A PNG without an `IEND` chunk is a truncated download, and the build
@@ -164,6 +172,10 @@ shape as `substack-sync`. Two rules the conversion must keep, both learned the h
 - **The design runtime never ships.** `support.js` needs React and exists to serve the
   authoring canvas. `deck-stage.js` has no such dependency and documents a plain-HTML
   usage; that is what gets published.
+
+A canvas from before this tool (the first talk's) carries no keys; `verify` matches it by
+position and still finds a figure drawn out of the deck or a note reworded — which is how the
+fork was measured: seven of thirty slides.
 
 Presenter tooling — speaker view, phone pairing, slide sync — is a *site* feature, not
 content. It reads `notes.json` from the store like anything else.
