@@ -23,7 +23,8 @@ GitHub release with the same text.
 
 - **`schedule.py record` writes its free text as quoted YAML scalars and refuses a result that
   would not parse** — the fix `arm` already had. An `--evidence` naming an API path with a colon
-  had made a manifest unreadable to every tool on the desk. PATCH.
+  had made a manifest unreadable to every tool on the desk; and the block is placed through a
+  callable, so an ellipsis in the evidence is not read as a regex escape. PATCH.
 
 - **A talk's tags live on the desk and reach the store.** `talks/<slug>/talk.yaml` takes `tags:`
   and `publication:` like a piece's `publish.yaml`; `tags.py` spans both namespaces (name a talk

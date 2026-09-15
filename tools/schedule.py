@@ -645,7 +645,9 @@ def cmd_record(args):
     # "GET /api/v1/drafts/<id>: postSchedules …" is the natural thing to write and its colon
     # made the whole manifest unreadable (a-writing-desk-that-keeps-its-receipts, 2026-09-15),
     # which every tool on the desk then refused — including `arm`, which reads the file.
-    qs = json.dumps
+    # ensure_ascii=False: an ellipsis or a curly quote in the evidence would otherwise become
+    # \u2026, and the block is placed with re.sub, which reads backslashes in a replacement.
+    qs = lambda v: json.dumps(v, ensure_ascii=False)
     entry = (f'  {args.outlet}:\n'
              f'    at: {fmt(moment)}\n'
              f'    set: {date.today().isoformat()}\n'
@@ -655,10 +657,11 @@ def cmd_record(args):
     if re.search(r'(?m)^scheduled:$', src):
         # replace this outlet's entry if it has one, else append to the block
         pat = re.compile(r'(?ms)^  %s:\n(?:    .*\n)*' % re.escape(args.outlet))
+        # The entry goes in through a callable, so nothing in it is read as a backslash escape.
         if pat.search(src):
-            src = pat.sub(entry, src, count=1)
+            src = pat.sub(lambda m: entry, src, count=1)
         else:
-            src = re.sub(r'(?m)^scheduled:$', 'scheduled:\n' + entry.rstrip('\n'), src, count=1)
+            src = re.sub(r'(?m)^scheduled:$', lambda m: 'scheduled:\n' + entry.rstrip('\n'), src, count=1)
     else:
         src = src.rstrip('\n') + (
             '\n\n# Native schedules actually SET on a platform, per outlet — the act, not the\n'
