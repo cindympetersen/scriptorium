@@ -214,6 +214,14 @@ pushed, and refuses the push if it is red. A desk push whose framework pointer i
 framework's `origin/main` is refused too: push the framework first. Don't bypass it with
 `git push --no-verify`.
 
+## Contributing back
+
+Your fork is where the framework gets tuned; upstream is where the tuning that would help a desk
+you have never seen goes. [CONTRIBUTING.md](CONTRIBUTING.md) says what belongs upstream (skills,
+tools, guards with their reasons, docs, platform ports), what never does (your writing, your
+voices, your outlets), and what a pull request carries — the failure it prevents, a `CHANGELOG`
+line with the number it moves, the docs, a test, green CI.
+
 ## Versioning
 
 Semantic versioning. The version is in [`VERSION`](VERSION), every release is a tag `vX.Y.Z` on

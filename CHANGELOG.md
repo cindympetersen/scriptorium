@@ -21,6 +21,10 @@ GitHub release with the same text.
 
 ## Unreleased
 
+- **Adoption is fork-first** (README, SETUP.md, `new-desk --framework <your fork>` with
+  `upstream` as a second remote), and **CONTRIBUTING.md** plus a pull-request template say what
+  belongs upstream, what never does, and what a PR carries. Docs only; nothing a desk must change.
+
 ## 0.1.0 — 2026-09-15
 
 The first tagged release, cut the day the framework moved to the `muffin-labs` organization.
