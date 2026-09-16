@@ -114,6 +114,7 @@ def check_commit(repo, sha):
             return 0
         py = venv_python(repo, os.path.join(base, 'requirements-ci.txt'))
         env = {k: v for k, v in os.environ.items() if k not in ('DESK_PIECES', 'PYTHONPATH', 'PYTHONHOME')}
+        env['PYTHONUTF8'] = '1'  # else open()'s default encoding is the Windows ANSI code page
         print(f'prepush: running CI on {short} — the commit, not the working tree …', flush=True)
         t = time.time()
         r = subprocess.run([py, check], cwd=root, env=env, capture_output=True, text=True)

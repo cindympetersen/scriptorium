@@ -25,6 +25,13 @@ GitHub release with the same text.
   `bin/python`, which only exists on POSIX; native Windows Python's `venv` module writes
   `Scripts/python.exe`, so every push failed with a `FileNotFoundError` before CI ever ran. PATCH.
 
+- **`prepush.py` runs the CI subprocess in Python's UTF-8 mode.** `open()`'s default encoding
+  on Windows is the console's ANSI code page, not UTF-8; `test_suite.py`'s own fixtures write
+  non-ASCII text (`from §V`) with no encoding named, which then failed to decode as UTF-8 on
+  read and turned every push red on Windows regardless of the commit's actual content. Setting
+  `PYTHONUTF8=1` on the subprocess env fixes the default without touching the 223 unguarded
+  `open()` calls in the vendored test suite. PATCH.
+
 - **`schedule.py record` writes its free text as quoted YAML scalars and refuses a result that
   would not parse** — the fix `arm` already had. An `--evidence` naming an API path with a colon
   had made a manifest unreadable to every tool on the desk; and the block is placed through a
