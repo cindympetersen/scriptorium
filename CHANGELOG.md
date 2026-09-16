@@ -25,6 +25,12 @@ GitHub release with the same text.
   `bin/python`, which only exists on POSIX; native Windows Python's `venv` module writes
   `Scripts/python.exe`, so every push failed with a `FileNotFoundError` before CI ever ran. PATCH.
 
+- **`engine_suite`'s node-availability check no longer crashes when node isn't installed at
+  all.** It probed with `subprocess.run(['node', '--version'])` and only checked the return
+  code; with no `node` on PATH that raises `FileNotFoundError` before a return code exists,
+  so a machine without node failed CI instead of skipping the suite, same as every other
+  node-gated check here already does with `shutil.which('node')`. PATCH.
+
 - **`prepush.py` decodes the CI subprocess's output as UTF-8, not the console code page.**
   The child now runs in `PYTHONUTF8` mode and emits UTF-8, but the parent's
   `subprocess.run(..., text=True)` decoded with Windows' `cp1252` by default, so any non-ASCII

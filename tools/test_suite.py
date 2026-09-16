@@ -5802,7 +5802,7 @@ def engine_suite(tmp):
     runner = os.path.join(HERE, 'test_substack_repatch.js')
     srunner = os.path.join(HERE, 'test_substack_structural.js')
     scanner = os.path.join(HERE, 'test_substack_scan.js')
-    if subprocess.run(['node', '--version'], capture_output=True).returncode != 0:
+    if not shutil.which('node'):
         skip('engine suite', 'node not available')
         return
     # Every snippet carries its piece's account guard, so a generator needs outlets.yaml to say
