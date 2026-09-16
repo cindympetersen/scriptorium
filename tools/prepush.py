@@ -59,6 +59,12 @@ def gitlink(repo, sha, path='framework'):
     return parts[2] if len(parts) >= 3 and parts[1] == 'commit' else None
 
 
+def venv_bin(venv):
+    """A venv's interpreter lives in bin/ on POSIX, Scripts/ on Windows."""
+    windows = os.path.join(venv, 'Scripts', 'python.exe')
+    return windows if os.path.exists(os.path.dirname(windows)) else os.path.join(venv, 'bin', 'python')
+
+
 def venv_python(repo, req):
     """A venv per requirements file content, kept in the repo's git dir (never tracked).
     Built beside its final path and renamed in, so two sessions pushing at once cannot
@@ -67,19 +73,19 @@ def venv_python(repo, req):
     with open(req, 'rb') as f:
         key = hashlib.sha256(f.read()).hexdigest()[:12]
     venv = os.path.join(common, f'ci-venv-{key}')
-    py = os.path.join(venv, 'bin', 'python')
+    py = venv_bin(venv)
     if os.path.exists(py):
         return py
     print(f'prepush: building {venv} from {os.path.basename(req)} (once per change to it)', flush=True)
     tmp = f'{venv}.tmp-{os.getpid()}'
     subprocess.run([sys.executable, '-m', 'venv', tmp], check=True)
-    subprocess.run([os.path.join(tmp, 'bin', 'python'), '-m', 'pip', 'install', '-q',
+    subprocess.run([venv_bin(tmp), '-m', 'pip', 'install', '-q',
                     '--disable-pip-version-check', '-r', req], check=True)
     try:
         os.rename(tmp, venv)
     except OSError:                                        # another session won the race
         shutil.rmtree(tmp, ignore_errors=True)
-    return py
+    return venv_bin(venv)
 
 
 def check_commit(repo, sha):

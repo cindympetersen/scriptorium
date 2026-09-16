@@ -21,6 +21,10 @@ GitHub release with the same text.
 
 ## Unreleased
 
+- **`prepush.py` builds its CI venv on Windows.** `venv_python` looked for the interpreter at
+  `bin/python`, which only exists on POSIX; native Windows Python's `venv` module writes
+  `Scripts/python.exe`, so every push failed with a `FileNotFoundError` before CI ever ran. PATCH.
+
 - **`schedule.py record` writes its free text as quoted YAML scalars and refuses a result that
   would not parse** — the fix `arm` already had. An `--evidence` naming an API path with a colon
   had made a manifest unreadable to every tool on the desk; and the block is placed through a
