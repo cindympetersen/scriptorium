@@ -117,7 +117,8 @@ def check_commit(repo, sha):
         env['PYTHONUTF8'] = '1'  # else open()'s default encoding is the Windows ANSI code page
         print(f'prepush: running CI on {short} — the commit, not the working tree …', flush=True)
         t = time.time()
-        r = subprocess.run([py, check], cwd=root, env=env, capture_output=True, text=True)
+        r = subprocess.run([py, check], cwd=root, env=env, capture_output=True,
+                            encoding='utf-8', errors='replace')
         out = (r.stdout + r.stderr).splitlines()
         took = f'{time.time() - t:.0f}s'
         if r.returncode == 0:

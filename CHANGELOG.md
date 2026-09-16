@@ -25,6 +25,12 @@ GitHub release with the same text.
   `bin/python`, which only exists on POSIX; native Windows Python's `venv` module writes
   `Scripts/python.exe`, so every push failed with a `FileNotFoundError` before CI ever ran. PATCH.
 
+- **`prepush.py` decodes the CI subprocess's output as UTF-8, not the console code page.**
+  The child now runs in `PYTHONUTF8` mode and emits UTF-8, but the parent's
+  `subprocess.run(..., text=True)` decoded with Windows' `cp1252` by default, so any non-ASCII
+  byte in CI's output crashed the reader thread before the hook could even report a verdict.
+  PATCH.
+
 - **`requirements-ci.txt` gains `tzdata`.** Windows ships no IANA timezone database, so
   `zoneinfo.ZoneInfo('America/New_York')` in `schedule.py` raised on every Windows run; the
   `tzdata` package supplies it and is a no-op on macOS/Linux, which already have system tz
