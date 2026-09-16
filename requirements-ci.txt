@@ -4,3 +4,4 @@ PyYAML>=6.0          # publish.yaml, the registries, tags — ten tools
 boto3                # store_publish, snapshot (the store tests run against a local fake)
 Pillow               # bundle image derivation, review embeds
 markdown-it-py       # check_commonmark — without it that check SKIPS, and a skip is not a pass
+tzdata               # zoneinfo's IANA database — Windows ships none; a no-op on macOS/Linux
