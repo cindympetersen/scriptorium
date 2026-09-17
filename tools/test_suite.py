@@ -1742,7 +1742,7 @@ def unit_corpus(tmp):
     check('corpus: a slug in neither namespace is None', corpus.find(root, 'nope') is None)
     check('corpus: kind is read from the directory, not the path',
           corpus.kind_of(talk) == 'talk' and corpus.kind_of(ess) == 'piece')
-    check('corpus: rel names the namespace', corpus.rel(root, talk) == os.path.join('talks', 'same-name'))
+    check('corpus: rel names the namespace', corpus.rel(root, talk) == 'talks/same-name')
 
     # The pair resolves both ways across the shared slug — the whole point of the move.
     c = cp.companion(ess, 'talk')

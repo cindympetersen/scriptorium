@@ -25,6 +25,11 @@ GitHub release with the same text.
   `bin/python`, which only exists on POSIX; native Windows Python's `venv` module writes
   `Scripts/python.exe`, so every push failed with a `FileNotFoundError` before CI ever ran. PATCH.
 
+- **The `corpus: rel names the namespace` test expects a hardcoded native-separator path.**
+  It built its expectation with `os.path.join('talks', 'same-name')`, which is `talks\same-name`
+  on Windows — the opposite of the ref convention `corpus.rel` is supposed to produce and the
+  fix just above restores. Hardcoded to the literal `'talks/same-name'`. PATCH.
+
 - **Namespace-qualified refs (`talks/<slug>`) and `rel()`/`context`'s printed paths now use
   forward slashes on Windows.** `corpus.find` and `publications.piece_dir` tested `os.sep in
   ref` to detect a `talks/<slug>`-style ref, but the desk's own convention always writes that
