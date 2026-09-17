@@ -25,6 +25,16 @@ GitHub release with the same text.
   `bin/python`, which only exists on POSIX; native Windows Python's `venv` module writes
   `Scripts/python.exe`, so every push failed with a `FileNotFoundError` before CI ever ran. PATCH.
 
+- **Namespace-qualified refs (`talks/<slug>`) and `rel()`/`context`'s printed paths now use
+  forward slashes on Windows.** `corpus.find` and `publications.piece_dir` tested `os.sep in
+  ref` to detect a `talks/<slug>`-style ref, but the desk's own convention always writes that
+  separator as a literal `/`; `os.sep` is `\` on Windows, so the check missed every such ref
+  and it fell through to being resolved as a bare slug. Separately, `corpus.rel` and
+  `publications.py`'s `context` command built paths with a bare `os.path.relpath`, which
+  returns native separators — `talks\a-talk` on Windows — breaking every comparison against a
+  hardcoded `/`-style ref. Both now match the `.replace(os.sep, '/')` pattern already used
+  correctly in `snapshot.py` and `store_publish.py`. PATCH.
+
 - **`engine_suite`'s node-availability check no longer crashes when node isn't installed at
   all.** It probed with `subprocess.run(['node', '--version'])` and only checked the return
   code; with no `node` on PATH that raises `FileNotFoundError` before a return code exists,

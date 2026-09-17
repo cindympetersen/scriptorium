@@ -80,7 +80,7 @@ def find(root, ref, prefer='piece'):
     `prefer` decides which namespace is searched first when a slug names a text in both;
     the other is still searched, so a pointer to a text that exists only once resolves
     wherever it lives."""
-    if os.sep in ref.rstrip(os.sep) or os.path.isdir(ref):
+    if '/' in ref or os.sep in ref.rstrip(os.sep) or os.path.isdir(ref):
         cand = os.path.normpath(ref)
         if os.path.isdir(cand):
             return cand
@@ -110,7 +110,7 @@ def namespace_of(text_dir):
 
 def rel(root, text_dir):
     """'talks/love-is-not-a-metric-space' — how a text is named in prose and in a link."""
-    return os.path.relpath(os.path.abspath(text_dir), os.path.abspath(root))
+    return os.path.relpath(os.path.abspath(text_dir), os.path.abspath(root)).replace(os.sep, '/')
 
 
 def slug_of(text_dir):

@@ -96,7 +96,7 @@ def piece_dir(root, ref):
     """A slug or a path -> the piece directory. Refuses one that does not exist."""
     import corpus
     cand = corpus.find(root, ref) or (
-        ref if os.sep in ref.rstrip(os.sep) else os.path.join(root, 'pieces', ref))
+        ref if '/' in ref or os.sep in ref.rstrip(os.sep) else os.path.join(root, 'pieces', ref))
     cand = os.path.normpath(cand)
     if not os.path.isdir(cand):
         raise Refused(f'no such piece: {ref}')
@@ -575,7 +575,7 @@ def _dispatch(a, root, pubs, reg_problems):
         # What governs this text below the desk — the files a drafting or reviewing skill loads.
         pid, probs = of_piece(read_manifest(d), pubs)
         style, book = readme_refs(d)
-        rel = lambda x: os.path.relpath(x, root)
+        rel = lambda x: os.path.relpath(x, root).replace(os.sep, '/')
         e = pubs.get(pid) or {}
         house = e.get('house')
         print(f"publication: {pid or '(none)'}" + (f"   ({e['name']})" if e else ''))
